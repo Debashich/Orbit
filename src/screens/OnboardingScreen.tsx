@@ -8,10 +8,12 @@ import {
     KeyboardAvoidingView,
     Platform,
     Dimensions,
+    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as Icons from '@expo/vector-icons';
+import { saveUserProfile } from '../../database/db';
 
 const { width } = Dimensions.get('window');
 
@@ -49,22 +51,52 @@ const QUESTIONS = [
     },
 ];
 
+const TOTAL_STEPS = QUESTIONS.length; // 4
+
 export default function OnboardingScreen() {
     const navigation = useNavigation<any>();
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState(['', '', '', '']);
+    const [isSaving, setIsSaving] = useState(false);
 
-    const handleNext = () => {
-        if (currentStep < QUESTIONS.length - 1) {
-            setCurrentStep(currentStep + 1);
+    const handleNext = async () => {
+        // Validate: don't allow empty answers
+        if (!answers[currentStep].trim()) {
+            Alert.alert('Required', 'Please enter an answer before continuing.', [{ text: 'OK' }]);
+            return;
+        }
+
+        if (currentStep < TOTAL_STEPS - 1) {
+            // Not last step — just go to next question
+            setCurrentStep(prev => prev + 1);
         } else {
-            navigation.navigate('Download');
+            // Last step — save and navigate
+            setIsSaving(true);
+            try {
+                const success = await saveUserProfile({
+                    height: answers[0],
+                    weight: answers[1],
+                    visionImpairment: answers[2],
+                    guidanceType: answers[3],
+                });
+
+                if (success) {
+                    navigation.navigate('Download');
+                } else {
+                    Alert.alert('Oops!', 'Could not save your profile. Please try again.', [{ text: 'OK' }]);
+                }
+            } catch (error) {
+                console.error('❌ handleNext error:', error);
+                Alert.alert('Error', 'Something went wrong. Please try again.', [{ text: 'OK' }]);
+            } finally {
+                setIsSaving(false);
+            }
         }
     };
 
     const handleBack = () => {
         if (currentStep > 0) {
-            setCurrentStep(currentStep - 1);
+            setCurrentStep(prev => prev - 1);
         }
     };
 
@@ -73,6 +105,8 @@ export default function OnboardingScreen() {
         newAnswers[currentStep] = text;
         setAnswers(newAnswers);
     };
+
+    const isLastStep = currentStep === TOTAL_STEPS - 1;
 
     return (
         <View style={styles.container}>
@@ -91,9 +125,9 @@ export default function OnboardingScreen() {
                     </TouchableOpacity>
                 </View>
 
-                {/* PROGRESS BAR */}
+                {/* PROGRESS BAR — fixed to match exactly 4 steps */}
                 <View style={styles.progressContainer}>
-                    {[0, 1, 2, 3, 4].map((index) => (
+                    {Array.from({ length: TOTAL_STEPS }).map((_, index) => (
                         <View
                             key={index}
                             style={[
@@ -110,6 +144,11 @@ export default function OnboardingScreen() {
                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                     style={styles.content}
                 >
+                    {/* STEP COUNTER */}
+                    <Text style={styles.stepCounter}>
+                        {currentStep + 1} / {TOTAL_STEPS}
+                    </Text>
+
                     {/* QUESTION TEXT */}
                     <View style={styles.textWrap}>
                         <Text style={styles.title}>{QUESTIONS[currentStep].title}</Text>
@@ -154,15 +193,25 @@ export default function OnboardingScreen() {
                         onPress={handleBack}
                         disabled={currentStep === 0}
                     >
-                        <SafeIcon set="Ionicons" name="arrow-back" size={24} color={currentStep === 0 ? "#333" : "#fff"} />
-                        <Text style={[styles.navText, currentStep === 0 && { color: '#333' }]}>Back</Text>
+                        <SafeIcon
+                            set="Ionicons"
+                            name="arrow-back"
+                            size={24}
+                            color={currentStep === 0 ? '#333' : '#fff'}
+                        />
+                        <Text style={[styles.navText, currentStep === 0 && { color: '#333' }]}>
+                            Back
+                        </Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        style={styles.navButton}
+                        style={[styles.navButton, isSaving && { opacity: 0.5 }]}
                         onPress={handleNext}
+                        disabled={isSaving}
                     >
-                        <Text style={styles.navText}>Next</Text>
+                        <Text style={styles.navText}>
+                            {isSaving ? 'Saving...' : isLastStep ? 'Finish' : 'Next'}
+                        </Text>
                         <SafeIcon set="Ionicons" name="arrow-forward" size={24} color="#fff" />
                     </TouchableOpacity>
                 </View>
@@ -227,6 +276,13 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    stepCounter: {
+        color: '#777',
+        fontSize: 14,
+        fontWeight: '600',
+        letterSpacing: 1,
+        marginBottom: 20,
     },
     textWrap: {
         alignItems: 'center',
