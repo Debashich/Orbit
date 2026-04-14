@@ -6,7 +6,7 @@ import DownloadScreen from './src/screens/DownloadScreen';
 import HomeScreen from './src/screens/HomeScreen';
 
 const RootStack = createNativeStackNavigator({
-  initialRouteName: 'Home',
+  initialRouteName: 'Onboarding',
   screens: {
     Onboarding: {
       screen: OnboardingScreen,

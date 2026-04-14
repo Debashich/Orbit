@@ -9,6 +9,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import * as Icons from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -26,6 +27,7 @@ const SafeIcon = ({ set, name, size, color }: any) => {
 };
 
 export default function DownloadScreen() {
+  const navigation = useNavigation<any>();
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -86,15 +88,19 @@ export default function DownloadScreen() {
             </View>
 
             {/* BUTTON */}
-            <TouchableOpacity activeOpacity={0.8} style={styles.buttonWrapper}>
+            <TouchableOpacity 
+              activeOpacity={0.8} 
+              style={styles.buttonWrapper}
+              onPress={() => navigation.navigate('Home')}
+            >
               <LinearGradient
                 colors={['#a855f7', '#db2777']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.pauseButton}
               >
-                <SafeIcon set="Ionicons" name="pause-circle" size={20} color="white" />
-                <Text style={styles.pauseButtonText}>PAUSE DOWNLOAD</Text>
+                <SafeIcon set="Ionicons" name="checkmark-circle" size={20} color="white" />
+                <Text style={styles.pauseButtonText}>CONTINUE TO APP</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>

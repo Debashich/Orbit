@@ -86,7 +86,7 @@ export default function OnboardingScreen() {
                             <Text style={{ color: '#d946ef' }}>Voice</Text>
                         </Text>
                     </View>
-                    <TouchableOpacity>
+                    <TouchableOpacity onPress={() => navigation.navigate('Download')}>
                         <Text style={styles.skipText}>Skip</Text>
                     </TouchableOpacity>
                 </View>
