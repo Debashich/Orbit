@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,13 @@ import {
   Dimensions,
   ScrollView,
   Image,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as Icons from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import RNFS from 'react-native-fs';
 
 const { width } = Dimensions.get('window');
 
@@ -28,6 +30,75 @@ const SafeIcon = ({ set, name, size, color }: any) => {
 
 export default function DownloadScreen() {
   const navigation = useNavigation<any>();
+  const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'completed' | 'error'>('idle');
+  const [progress, setProgress] = useState(0);
+  const [downloadedMB, setDownloadedMB] = useState(0);
+  const [totalMB, setTotalMB] = useState(1300);
+
+  useEffect(() => {
+    // Check if already downloaded
+    const checkFile = async () => {
+      try {
+        const destPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
+        const exists = await RNFS.exists(destPath);
+        if (exists) {
+          const stat = await RNFS.stat(destPath);
+          setDownloadState('completed');
+          setProgress(100);
+          setDownloadedMB(stat.size / 1024 / 1024);
+          setTotalMB(stat.size / 1024 / 1024);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    checkFile();
+  }, []);
+
+  const startDownload = async () => {
+    const modelUrl = 'https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/google_gemma-4-E2B-it-Q4_K_M.gguf';
+    const destPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
+
+    setDownloadState('downloading');
+    setProgress(0);
+
+    try {
+      const exists = await RNFS.exists(destPath);
+      if (exists) {
+        await RNFS.unlink(destPath);
+      }
+
+      const result = RNFS.downloadFile({
+        fromUrl: modelUrl,
+        toFile: destPath,
+        background: true,
+        discretionary: true,
+        begin: (res) => {
+          setTotalMB(res.contentLength / 1024 / 1024);
+        },
+        progress: (res) => {
+          const percent = (res.bytesWritten / res.contentLength) * 100;
+          setProgress(percent);
+          setDownloadedMB(res.bytesWritten / 1024 / 1024);
+        },
+        progressDivider: 1,
+      });
+
+      const finalRes = await result.promise;
+      if (finalRes.statusCode === 200) {
+        setDownloadState('completed');
+        setProgress(100);
+      } else {
+        setDownloadState('error');
+        Alert.alert('Download Failed', 'Server returned ' + finalRes.statusCode);
+      }
+    } catch (err: any) {
+      console.error('Download error:', err);
+      setDownloadState('error');
+      Alert.alert('Download Error', err.message || 'An error occurred during download.');
+    }
+  };
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -51,8 +122,16 @@ export default function DownloadScreen() {
 
           {/* TITLE SECTION */}
           <View style={styles.titleSection}>
-            <Text style={styles.title}>Downloading AI model...</Text>
-            <Text style={styles.subtitle}>Your intelligence is initializing.</Text>
+            <Text style={styles.title}>
+              {downloadState === 'completed' ? 'Model Ready!' : 
+               downloadState === 'downloading' ? 'Downloading AI model...' : 
+               downloadState === 'error' ? 'Download Failed' : 
+               'Get AI Model'}
+            </Text>
+            <Text style={styles.subtitle}>
+              {downloadState === 'completed' ? 'Your local intelligence is ready.' : 
+               'Your intelligence is initializing.'}
+            </Text>
           </View>
 
           {/* MAIN CARD */}
@@ -61,15 +140,17 @@ export default function DownloadScreen() {
               <SafeIcon set="MaterialCommunityIcons" name="cpu-64-bit" size={32} color="#f0abfc" />
             </View>
 
-            <Text style={styles.cardTitle}>Gemma 4 Model (2GB)</Text>
+            <Text style={styles.cardTitle}>Gemma 4 E2B (~1.3GB)</Text>
             <Text style={styles.cardSubtitle}>
               Enhanced natural language processing & vision-to-speech engine.
             </Text>
 
             {/* PROGRESS BAR */}
             <View style={styles.progressHeader}>
-              <Text style={styles.progressPercent}>45%</Text>
-              <Text style={styles.progressSize}>890 MB / 2 GB</Text>
+              <Text style={styles.progressPercent}>{Math.round(progress)}%</Text>
+              <Text style={styles.progressSize}>
+                {downloadedMB.toFixed(1)} MB / {totalMB.toFixed(1)} MB
+              </Text>
             </View>
 
             <View style={styles.progressBarTrack}>
@@ -77,7 +158,7 @@ export default function DownloadScreen() {
                 colors={['#c084fc', '#db2777']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
-                style={[styles.progressBarFill, { width: '45%' }]}
+                style={[styles.progressBarFill, { width: `${progress}%` }]}
               />
             </View>
 
@@ -91,16 +172,33 @@ export default function DownloadScreen() {
             <TouchableOpacity 
               activeOpacity={0.8} 
               style={styles.buttonWrapper}
-              onPress={() => navigation.navigate('Home')}
+              disabled={downloadState === 'downloading'}
+              onPress={() => {
+                if (downloadState === 'completed') {
+                  navigation.navigate('Home');
+                } else {
+                  startDownload();
+                }
+              }}
             >
               <LinearGradient
-                colors={['#a855f7', '#db2777']}
+                colors={downloadState === 'completed' ? ['#10b981', '#059669'] : ['#a855f7', '#db2777']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
-                style={styles.pauseButton}
+                style={[styles.pauseButton, downloadState === 'downloading' && { opacity: 0.7 }]}
               >
-                <SafeIcon set="Ionicons" name="checkmark-circle" size={20} color="white" />
-                <Text style={styles.pauseButtonText}>CONTINUE TO APP</Text>
+                <SafeIcon 
+                  set="Ionicons" 
+                  name={downloadState === 'completed' ? "checkmark-circle" : downloadState === 'downloading' ? "cloud-download" : "cloud-download-outline"} 
+                  size={20} 
+                  color="white" 
+                />
+                <Text style={styles.pauseButtonText}>
+                  {downloadState === 'completed' ? 'CONTINUE TO APP' : 
+                   downloadState === 'downloading' ? 'DOWNLOADING...' : 
+                   downloadState === 'error' ? 'RETRY DOWNLOAD' : 
+                   'START DOWNLOAD'}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
