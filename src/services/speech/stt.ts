@@ -88,8 +88,9 @@ export const startVoice = async (onResult: (text: string) => void, onEnd: () => 
 export const stopVoice = async () => {
   try {
     console.log('[STT] ⏹️ Stopping voice recognition');
-    ExpoSpeechRecognitionModule.stop();
     isListeningNow = false;
+    clearListeners();
+    ExpoSpeechRecognitionModule.stop();
   } catch (err) {
     console.error('[STT] ❌ Stop Error:', err);
   }
