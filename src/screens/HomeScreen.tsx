@@ -45,18 +45,7 @@ export default function HomeScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
-    const init = async () => {
-      try {
-        setIsInitializing(false);
-      } catch (err) {
-        console.error('Init error:', err);
-      } finally {
-        setIsInitializing(false);
-      }
-    };
-
-    init();
-
+    setIsInitializing(false);
     return () => {
       stop();
     };
