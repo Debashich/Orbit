@@ -25,7 +25,8 @@ export const startVoice = async (onResult: (text: string) => void, onEnd: () => 
     console.log('[STT] 📢 Starting voice recognition...');
     
     if (isListeningNow) {
-      console.log('[STT] ⚠️ Already listening, returning');
+      console.log('[STT] ⚠️ Already listening, ending duplicate start request');
+      onEnd();
       return;
     }
 
