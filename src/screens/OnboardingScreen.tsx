@@ -105,12 +105,12 @@ export default function OnboardingScreen() {
 
         await stop();
         
-        setTimeout(() => {
-            speak('Go ahead, speak now', () => {
+        speak('Go ahead, speak now', () => {
+            setTimeout(() => {
                 console.log('[Screen] Starting to listen after TTS');
                 startListening();
-            });
-        }, 100);
+            }, 100);
+        });
     };
 
     const handleNext = async () => {
