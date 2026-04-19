@@ -35,6 +35,8 @@ export const useSTT = () => {
   const stopListening = useCallback(async () => {
     console.log('[Hook] ⏹️ stopListening called');
     await stopVoice();
+    setIsListening(false);
+    isListeningRef.current = false;
   }, []);
 
   useEffect(() => {
