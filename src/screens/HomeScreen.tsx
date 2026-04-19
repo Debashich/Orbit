@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,13 @@ import {
   TouchableOpacity,
   Dimensions,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Icons from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTTS } from '../hooks/useTTS';
+import { useSTT } from '../hooks/useSTT';
 
 const { width } = Dimensions.get('window');
 
@@ -26,7 +29,101 @@ const SafeIcon = ({ set, name, size, color }: any) => {
 
 const WAVE_HEIGHTS = [15, 25, 45, 60, 45, 65, 45, 55, 35, 20, 15];
 
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  footer?: string;
+}
+
 export default function HomeScreen() {
+  const { speak, stop } = useTTS();
+  const { transcript, isListening, startListening, stopListening } = useSTT();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    setIsInitializing(false);
+    return () => {
+      stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    // Auto-scroll to bottom when messages change
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollToEnd({ animated: true });
+    }
+  }, [messages]);
+
+  // Handle automatic sending when transcript is captured
+  useEffect(() => {
+    if (transcript && !isListening && !isGenerating) {
+      console.log('--- Triggering Send Message ---');
+      console.log('Final Transcript:', transcript);
+      sendMessage(transcript);
+    }
+  }, [transcript, isListening, isGenerating]);
+
+  const handleMicPress = async () => {
+    if (isGenerating) return;
+
+    await stop();
+
+    if (isListening) {
+      await stopListening();
+      return;
+    }
+
+    speak('Start speaking now', () => {
+      setTimeout(() => {
+        console.log('[Screen] Starting to listen after TTS');
+        startListening();
+      }, 100);
+    });
+  };
+
+  const sendMessage = async (text: string) => {
+    if (isGenerating || !text.trim()) return;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: text,
+    };
+
+    setMessages(prev => [...prev, userMsg]);
+    setIsGenerating(true);
+
+    const assistantMsgId = (Date.now() + 1).toString();
+    let fullResponse = '';
+
+    try {
+      fullResponse = 'I heard you, but local AI is currently disabled. Enable model initialization to get generated replies.';
+      setMessages(prev => [
+        ...prev,
+        { id: assistantMsgId, role: 'assistant', content: fullResponse, footer: 'SYSTEM' },
+      ]);
+      
+      speak(fullResponse);
+    } catch (err) {
+      console.error('Completion error:', err);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  if (isInitializing) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <ActivityIndicator size="large" color="#d946ef" />
+        <Text style={[styles.listeningText, { marginTop: 20 }]}>INITIALIZING AI...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -47,36 +144,33 @@ export default function HomeScreen() {
         </View>
 
         <ScrollView
+          ref={scrollViewRef}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* USER BUBBLE 1 */}
-          <View style={styles.userBubble}>
-            <Text style={styles.userText}>Should I go out with an umbrella?</Text>
-          </View>
-
-          {/* AI BUBBLE 1 */}
-          <View style={styles.aiBubbleWrapper}>
-            <View style={styles.aiGlow} />
-            <View style={styles.aiBubble}>
-              <Text style={styles.aiText}>Weather is clear, no need.</Text>
-              <Text style={styles.aiFooter}>VISION INSIGHT</Text>
+          {messages.length === 0 && (
+            <View style={styles.center}>
+              <Text style={styles.aiText}>
+                {isListening ? 'Listening...' : 'Tap the mic to start talking to Clara.'}
+              </Text>
             </View>
-          </View>
+          )}
 
-          {/* USER BUBBLE 2 */}
-          <View style={styles.userBubble}>
-            <Text style={styles.userText}>Is the traffic light green?</Text>
-          </View>
-
-          {/* AI BUBBLE 2 */}
-          <View style={styles.aiBubbleWrapper}>
-            <View style={styles.aiGlow} />
-            <View style={styles.aiBubble}>
-              <Text style={styles.aiText}>No, wait for 10 seconds.</Text>
-              <Text style={styles.aiFooter}>REAL-TIME VISION</Text>
-            </View>
-          </View>
+          {messages.map((msg) => (
+            msg.role === 'user' ? (
+              <View key={msg.id} style={styles.userBubble}>
+                <Text style={styles.userText}>{msg.content}</Text>
+              </View>
+            ) : (
+              <View key={msg.id} style={styles.aiBubbleWrapper}>
+                <View style={styles.aiGlow} />
+                <View style={styles.aiBubble}>
+                  <Text style={styles.aiText}>{msg.content}</Text>
+                  {msg.footer && <Text style={styles.aiFooter}>{msg.footer}</Text>}
+                </View>
+              </View>
+            )
+          ))}
 
           {/* Add bottom padding to allow scrolling past the fixed UI */}
           <View style={{ height: 200 }} />
@@ -92,11 +186,13 @@ export default function HomeScreen() {
               <LinearGradient
                 key={i}
                 colors={['#c084fc', '#db2777']}
-                style={[styles.waveBar, { height: h }]}
+                style={[styles.waveBar, { height: (isGenerating || isListening) ? h * (Math.random() * 0.5 + 0.5) : 5 }]}
               />
             ))}
           </View>
-          <Text style={styles.listeningText}>LISTENING FOR VOICE</Text>
+          <Text style={styles.listeningText}>
+            {isGenerating ? 'CLARA IS THINKING...' : (transcript || 'Say something...')}
+          </Text>
         </View>
 
         {/* TAB BAR */}
@@ -108,12 +204,20 @@ export default function HomeScreen() {
           {/* GLOWING MIC BUTTON */}
           <View style={styles.tabMicWrapper}>
             <View style={styles.micGlow} />
-            <TouchableOpacity activeOpacity={0.8}>
+            <TouchableOpacity 
+              activeOpacity={0.8} 
+              onPress={handleMicPress}
+              disabled={isGenerating}
+            >
               <LinearGradient
-                colors={['#a855f7', '#db2777']}
-                style={styles.tabMicButton}
+                colors={isListening ? ['#ef4444', '#b91c1c'] : ['#a855f7', '#db2777']}
+                style={[styles.tabMicButton, isGenerating && { opacity: 0.5 }]}
               >
-                <SafeIcon set="Ionicons" name="mic" size={32} color="white" />
+                {isGenerating ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <SafeIcon set="Ionicons" name={isListening ? "stop" : "mic"} size={32} color="white" />
+                )}
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -131,6 +235,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0f111a',
+  },
+  center: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
   safeArea: {
     flex: 1,
@@ -220,6 +329,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     lineHeight: 30,
     fontWeight: '400',
+    textAlign: 'center',
   },
   aiFooter: {
     color: '#94a3b8',
@@ -256,11 +366,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 2,
     fontWeight: '600',
+    paddingHorizontal: 40,
+    textAlign: 'center',
   },
   bottomTabBar: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    alignItems: 'flex-end', /* aligns settings and history correctly relative to mic */
+    alignItems: 'flex-end',
     paddingBottom: 40,
     paddingHorizontal: 20,
   },
@@ -294,3 +406,5 @@ const styles = StyleSheet.create({
     elevation: 15,
   },
 });
+
+

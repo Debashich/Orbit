@@ -1,0 +1,108 @@
+import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
+
+let activeListeners: Array<{ remove: () => void }> = [];
+let isListeningNow = false;
+
+const clearListeners = () => {
+  activeListeners.forEach((listener) => listener.remove());
+  activeListeners = [];
+};
+
+export const checkMicrophonePermission = async () => {
+  try {
+    console.log('[STT] 🔐 Checking microphone permission...');
+    const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    console.log('[STT] 🔐 Permission result:', result.granted, 'Status:', result.status);
+    return result.granted;
+  } catch (err) {
+    console.error('[STT] ❌ Permission check failed:', err);
+    return false;
+  }
+};
+
+export const startVoice = async (onResult: (text: string) => void, onEnd: () => void) => {
+  try {
+    console.log('[STT] 📢 Starting voice recognition...');
+    
+    if (isListeningNow) {
+      console.log('[STT] ⚠️ Already listening, ending duplicate start request');
+      onEnd();
+      return;
+    }
+
+    clearListeners();
+    isListeningNow = true;
+
+    const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    console.log('[STT] 📋 Permission result:', result.granted, 'Status:', result.status);
+    
+    if (!result.granted) {
+      console.warn('[STT] ❌ Microphone permission DENIED. User must grant permission in Android Settings.');
+      console.warn('[STT] ❌ Status:', result.status);
+      isListeningNow = false;
+      onEnd();
+      return;
+    }
+
+    console.log('[STT] ✅ Permission GRANTED! Setting up listeners...');
+
+    const resultListener = ExpoSpeechRecognitionModule.addListener('result', (event) => {
+      console.log('[STT] 📝 Result event:', event);
+      if (event.results && event.results[0]) {
+        const transcript = event.results[0].transcript;
+        console.log('[STT] ✅ Transcript:', transcript);
+        onResult(transcript);
+      }
+    });
+
+    const errorListener = ExpoSpeechRecognitionModule.addListener('error', (event) => {
+      console.error('[STT] ❌ Error:', event.error, event.message);
+      isListeningNow = false;
+      clearListeners();
+      onEnd();
+    });
+
+    const endListener = ExpoSpeechRecognitionModule.addListener('end', () => {
+      console.log('[STT] 🛑 Listening ended');
+      isListeningNow = false;
+      clearListeners();
+      onEnd();
+    });
+
+    activeListeners = [resultListener, errorListener, endListener];
+    console.log('[STT] ✅ Listeners registered');
+
+    console.log('[STT] 🚀 Calling module.start()');
+    ExpoSpeechRecognitionModule.start({
+      lang: 'en-IN',
+      interimResults: true,
+    });
+    console.log('[STT] ✅ start() called successfully');
+  } catch (err) {
+    console.error('[STT] ❌ Start Error:', err);
+    isListeningNow = false;
+    onEnd();
+  }
+};
+
+export const stopVoice = async () => {
+  try {
+    console.log('[STT] ⏹️ Stopping voice recognition');
+    isListeningNow = false;
+    clearListeners();
+    ExpoSpeechRecognitionModule.stop();
+  } catch (err) {
+    console.error('[STT] ❌ Stop Error:', err);
+  }
+};
+
+export const destroyVoice = async () => {
+  try {
+    console.log('[STT] 🗑️ Destroying voice recognition');
+    ExpoSpeechRecognitionModule.abort();
+    isListeningNow = false;
+    clearListeners();
+  } catch (err) {
+    console.error('[STT] ❌ Destroy Error:', err);
+  }
+};
