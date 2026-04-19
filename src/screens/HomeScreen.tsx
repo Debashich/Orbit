@@ -88,12 +88,12 @@ export default function HomeScreen() {
       return;
     }
 
-    setTimeout(() => {
-      speak('Start speaking now', () => {
+    speak('Start speaking now', () => {
+      setTimeout(() => {
         console.log('[Screen] Starting to listen after TTS');
         startListening();
-      });
-    }, 100);
+      }, 100);
+    });
   };
 
   const sendMessage = async (text: string) => {
@@ -417,6 +417,5 @@ const styles = StyleSheet.create({
     elevation: 15,
   },
 });
-
 
 
