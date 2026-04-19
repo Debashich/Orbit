@@ -1,5 +1,5 @@
 import * as Speech from 'expo-speech';
-import { Vibration, Platform } from 'react-native';
+import { Vibration } from 'react-native';
 import { VOICE_CONFIG } from '../../constants/voice';
 
 let isSpeaking = false;
