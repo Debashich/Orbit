@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -14,6 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as Icons from '@expo/vector-icons';
 import { saveUserProfile } from '../../database/db';
+import { useTTS } from '../hooks/useTTS';
+import { useSTT } from '../hooks/useSTT';
+import { checkMicrophonePermission } from '../services/speech/stt';
 
 const { width } = Dimensions.get('window');
 
@@ -55,9 +58,60 @@ const TOTAL_STEPS = QUESTIONS.length; // 4
 
 export default function OnboardingScreen() {
     const navigation = useNavigation<any>();
+    const { speak, stop } = useTTS();
+    const { transcript, isListening, startListening, stopListening } = useSTT();
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState(['', '', '', '']);
     const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        const init = async () => {
+            console.log('[Screen] 🚀 OnboardingScreen mounted, requesting permissions...');
+            const granted = await checkMicrophonePermission();
+            console.log('[Screen] 🔐 Permission granted:', granted);
+        };
+        init();
+    }, []);
+
+    useEffect(() => {
+        console.log('[Screen] 🎤 Speaking welcome message...');
+        const welcomeMsg = 'Welcome to Clara';
+        console.log('[Screen] 📢 Calling speak with:', welcomeMsg);
+        speak(welcomeMsg);
+        return () => {
+            console.log('[Screen] 🧹 Cleanup: stopping speech');
+            stop();
+        };
+    }, [speak, stop]);
+
+    useEffect(() => {
+        if (currentStep > 0) {
+            const question = QUESTIONS[currentStep];
+            speak(`${question.title}. ${question.subtitle}`);
+        }
+    }, [currentStep]);
+
+    useEffect(() => {
+        if (transcript.trim()) {
+            updateAnswer(transcript);
+        }
+    }, [transcript]);
+
+    const handleMicPress = async () => {
+        if (isListening) {
+            await stopListening();
+            return;
+        }
+
+        await stop();
+        
+        setTimeout(() => {
+            speak('Go ahead, speak now', () => {
+                console.log('[Screen] Starting to listen after TTS');
+                startListening();
+            });
+        }, 100);
+    };
 
     const handleNext = async () => {
         // Validate: don't allow empty answers
@@ -173,14 +227,17 @@ export default function OnboardingScreen() {
                                 ))}
                             </View>
                             <Text style={styles.tapToSpeak}>TAP TO SPEAK</Text>
+                            {!!transcript && (
+                                <Text style={[styles.tapToSpeak, { marginTop: 10, color: '#d946ef' }]}>{transcript}</Text>
+                            )}
                         </View>
                     </View>
 
                     {/* MIC BUTTON */}
                     <View style={styles.micButtonContainer}>
-                        <TouchableOpacity activeOpacity={0.8}>
-                            <View style={[styles.micButton, { backgroundColor: '#9333ea' }]}>
-                                <SafeIcon set="Ionicons" name="mic" size={36} color="white" />
+                        <TouchableOpacity activeOpacity={0.8} onPress={handleMicPress}>
+                            <View style={[styles.micButton, { backgroundColor: isListening ? '#dc2626' : '#9333ea' }]}> 
+                                <SafeIcon set="Ionicons" name={isListening ? 'stop' : 'mic'} size={36} color="white" />
                             </View>
                         </TouchableOpacity>
                     </View>
