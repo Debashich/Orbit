@@ -227,19 +227,25 @@ export default function DownloadScreen() {
 
       {/* BOTTOM TAB BAR (Overlay) */}
       <View style={styles.bottomTabBar}>
-        <TouchableOpacity style={styles.tabIcon}>
+        <TouchableOpacity 
+          style={styles.tabIcon}
+          onPress={() => navigation.navigate('Chat')}
+        >
           <SafeIcon set="MaterialCommunityIcons" name="history" size={28} color="#94a3b8" />
         </TouchableOpacity>
 
-        {/* GLOWING MIC BUTTON */}
+        {/* GLOWING CHAT BUTTON */}
         <View style={styles.tabMicWrapper}>
           <View style={styles.micGlow} />
-          <TouchableOpacity activeOpacity={0.8}>
+          <TouchableOpacity 
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('Chat')}
+          >
             <LinearGradient
               colors={['#d946ef', '#9333ea']}
               style={styles.tabMicButton}
             >
-              <SafeIcon set="Ionicons" name="mic" size={36} color="white" />
+              <SafeIcon set="Ionicons" name="chatbubble-ellipses" size={32} color="white" />
             </LinearGradient>
           </TouchableOpacity>
         </View>
