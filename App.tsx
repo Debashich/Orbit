@@ -4,10 +4,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import DownloadScreen from './src/screens/DownloadScreen';
 import HomeScreen from './src/screens/HomeScreen';
+import ChatScreen from './src/screens/ChatScreen';
 import { getUserProfile, initDatabase, saveUserProfile } from './database/db';
-//import { debugPrintAllData } from './database/db';
-// call anywhere during development
-//await debugPrintAllData();
 
 const RootStack = createNativeStackNavigator({
   initialRouteName: 'Onboarding',
@@ -22,6 +20,10 @@ const RootStack = createNativeStackNavigator({
     },
     Home: {
       screen: HomeScreen,
+      options: { headerShown: false },
+    },
+    Chat: {
+      screen: ChatScreen,
       options: { headerShown: false },
     },
   },

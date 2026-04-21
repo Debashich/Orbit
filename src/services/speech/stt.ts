@@ -56,7 +56,8 @@ export const startVoice = async (onResult: (text: string) => void, onEnd: () => 
     });
 
     const errorListener = ExpoSpeechRecognitionModule.addListener('error', (event) => {
-      console.error('[STT] ❌ Error:', event.error, event.message);
+      console.error('[STT] ❌ Error details:', JSON.stringify(event));
+      console.error('[STT] ❌ Error code:', event.error, 'Message:', event.message);
       isListeningNow = false;
       clearListeners();
       onEnd();

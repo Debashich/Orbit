@@ -36,7 +36,7 @@ interface Message {
   footer?: string;
 }
 
-export default function HomeScreen() {
+export default function HomeScreen({ navigation }: any) {
   const { speak, stop } = useTTS();
   const { transcript, isListening, startListening, stopListening } = useSTT();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -197,27 +197,25 @@ export default function HomeScreen() {
 
         {/* TAB BAR */}
         <View style={styles.bottomTabBar}>
-          <TouchableOpacity style={styles.tabIcon}>
+          <TouchableOpacity 
+            style={styles.tabIcon} 
+            onPress={() => navigation.navigate('Chat')}
+          >
             <SafeIcon set="MaterialCommunityIcons" name="history" size={28} color="#94a3b8" />
           </TouchableOpacity>
 
-          {/* GLOWING MIC BUTTON */}
+          {/* GLOWING CHAT BUTTON */}
           <View style={styles.tabMicWrapper}>
             <View style={styles.micGlow} />
             <TouchableOpacity 
               activeOpacity={0.8} 
-              onPress={handleMicPress}
-              disabled={isGenerating}
+              onPress={() => navigation.navigate('Chat')}
             >
               <LinearGradient
-                colors={isListening ? ['#ef4444', '#b91c1c'] : ['#a855f7', '#db2777']}
-                style={[styles.tabMicButton, isGenerating && { opacity: 0.5 }]}
+                colors={['#a855f7', '#db2777']}
+                style={styles.tabMicButton}
               >
-                {isGenerating ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <SafeIcon set="Ionicons" name={isListening ? "stop" : "mic"} size={32} color="white" />
-                )}
+                <SafeIcon set="Ionicons" name="chatbubble-ellipses" size={32} color="white" />
               </LinearGradient>
             </TouchableOpacity>
           </View>
