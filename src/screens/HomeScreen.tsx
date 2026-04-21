@@ -212,8 +212,8 @@ export default function HomeScreen({ navigation }: any) {
               onPress={() => navigation.navigate('Chat')}
             >
               <LinearGradient
-                colors={['#a855f7', '#db2777']}
-                style={styles.tabMicButton}
+                colors={isListening ? ['#ef4444', '#b91c1c'] : ['#a855f7', '#db2777']}
+                style={[styles.tabMicButton, isGenerating && { opacity: 0.5 }]}
               >
                 <SafeIcon set="Ionicons" name="chatbubble-ellipses" size={32} color="white" />
               </LinearGradient>
@@ -404,5 +404,4 @@ const styles = StyleSheet.create({
     elevation: 15,
   },
 });
-
 
