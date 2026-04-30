@@ -22,11 +22,14 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
+      "largeHeap": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.INTERNET",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ],
       "package": "com.anonymous.VisionVoice"
     },
@@ -36,7 +39,8 @@
     "plugins": [
       "expo-font",
       "expo-sqlite",
-      "expo-speech-recognition"
+      "expo-speech-recognition",
+      "expo-location"
     ]
   }
 }

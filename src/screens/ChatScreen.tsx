@@ -10,10 +10,15 @@ import {
   Platform,
   SafeAreaView,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSTT } from '../hooks/useSTT';
+import { useNavigation } from '@react-navigation/native';
+import { initLlama, LlamaContext } from 'llama.rn';
+import RNFS from 'react-native-fs';
+import { getCurrentLocation, LocationData } from '../services/location';
 
 interface Message {
   id: string;
@@ -22,13 +27,24 @@ interface Message {
   timestamp: Date;
 }
 
-const ChatScreen = ({ navigation }: any) => {
+const ChatScreen = ({ navigation: propNavigation }: any) => {
+  const hookNavigation = useNavigation<any>();
+  const navigation = propNavigation || hookNavigation;
   const [isInitializing, setIsInitializing] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [context, setContext] = useState<LlamaContext | null>(null);
+  const contextRef = useRef<LlamaContext | null>(null);
+  const [location, setLocation] = useState<LocationData | null>(null);
+  
   const flatListRef = useRef<FlatList>(null);
   const { transcript, isListening, startListening, stopListening } = useSTT();
+
+  // Sync ref with state
+  useEffect(() => {
+    contextRef.current = context;
+  }, [context]);
 
   useEffect(() => {
     if (transcript && isListening) {
@@ -37,20 +53,67 @@ const ChatScreen = ({ navigation }: any) => {
   }, [transcript, isListening]);
 
   useEffect(() => {
-    // Simulate checking if the model is downloaded/loaded
-    const checkModel = async () => {
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate load time
-      setIsInitializing(false);
-      setMessages([
-        {
-          id: '1',
-          text: 'Hello! I am Clara. The AI model is loaded and I am ready to assist you.',
-          sender: 'ai',
-          timestamp: new Date(),
-        },
-      ]);
+    const initializeApp = async () => {
+      try {
+        // Load Location
+        const loc = await getCurrentLocation();
+        setLocation(loc);
+
+        // Load Model
+        const modelPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
+        const exists = await RNFS.exists(modelPath);
+        
+        if (!exists) {
+          Alert.alert(
+            "Model Not Found",
+            "Please download the model first.",
+            [{ text: "OK", onPress: () => navigation.navigate('Download') }]
+          );
+          return;
+        }
+
+        const stats = await RNFS.stat(modelPath);
+        console.log(`[Chat] Model file size: ${stats.size} bytes`);
+
+        if (stats.size < 1400000000) { // Gemma 2 2b Q4_K_M should be ~1.6GB
+           Alert.alert(
+             "Model Incomplete", 
+             "The model file is incomplete or corrupted. Please go back to the Download screen and re-download it.",
+             [{ text: "Go to Download", onPress: () => navigation.navigate('Download') }]
+           );
+           return;
+        }
+
+        const llamaContext = await initLlama({
+          model: modelPath,
+          use_mlock: false, // Set to false for better compatibility on emulators/mid-range devices
+          n_ctx: 512,       // Further reduced context for initial loading stability
+        });
+        
+        setContext(llamaContext);
+        setIsInitializing(false);
+        
+        setMessages([
+          {
+            id: '1',
+            text: `Hello! I am Clara. I've detected your location as ${loc?.address || 'unknown'}. How can I help you today?`,
+            sender: 'ai',
+            timestamp: new Date(),
+          },
+        ]);
+      } catch (error) {
+        console.error('Initialization error:', error);
+        Alert.alert("Error", "Failed to initialize AI model or location services.");
+      }
     };
-    checkModel();
+
+    initializeApp();
+
+    return () => {
+      if (contextRef.current) {
+        contextRef.current.release();
+      }
+    };
   }, []);
 
   const handleMicPress = async () => {
@@ -61,31 +124,70 @@ const ChatScreen = ({ navigation }: any) => {
     }
   };
 
-  const sendMessage = () => {
-    if (inputText.trim() === '') return;
+  const sendMessage = async () => {
+    if (inputText.trim() === '' || !context) return;
 
+    const userText = inputText.trim();
     const newUserMessage: Message = {
       id: Date.now().toString(),
-      text: inputText.trim(),
+      text: userText,
       sender: 'user',
       timestamp: new Date(),
     };
 
     setMessages((prev) => [...prev, newUserMessage]);
     setInputText('');
-
-    // Simulate AI response
     setIsTyping(true);
-    setTimeout(() => {
-      const aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        text: "I'm a dummy chat template for now. Soon I'll be integrated with a real AI model and voice capabilities!",
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, aiResponse]);
+
+    const aiMessageId = (Date.now() + 1).toString();
+    const newAiMessage: Message = {
+      id: aiMessageId,
+      text: '',
+      sender: 'ai',
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, newAiMessage]);
+
+    try {
+      // Refresh location for the most up-to-date context
+      const currentLoc = await getCurrentLocation();
+      setLocation(currentLoc);
+
+      const locationContext = currentLoc 
+        ? `User is currently at ${currentLoc.address} (Lat: ${currentLoc.latitude}, Lon: ${currentLoc.longitude}). `
+        : "User location is unavailable. ";
+
+      const prompt = `System: You are Clara, a helpful AI assistant. ${locationContext}Respond concisely.
+User: ${userText}
+AI:`;
+
+      let fullResponse = '';
+      await context.completion(
+        {
+          prompt,
+          n_predict: 400,
+          stop: ['User:', 'System:'],
+        },
+        (res) => {
+          fullResponse += res.token;
+          setMessages((prev) => 
+            prev.map((msg) => 
+              msg.id === aiMessageId ? { ...msg, text: fullResponse.trim() } : msg
+            )
+          );
+        }
+      );
+    } catch (error) {
+      console.error('Completion error:', error);
+      setMessages((prev) => 
+        prev.map((msg) => 
+          msg.id === aiMessageId ? { ...msg, text: "Sorry, I encountered an error while thinking." } : msg
+        )
+      );
+    } finally {
       setIsTyping(false);
-    }, 1500);
+    }
   };
 
   useEffect(() => {
@@ -142,6 +244,43 @@ const ChatScreen = ({ navigation }: any) => {
     );
   }
 
+  const handleClearSession = async () => {
+    try {
+      setIsInitializing(true);
+      if (context) {
+        await context.release();
+        setContext(null);
+      }
+      setMessages([]);
+      
+      // Re-run initialization to get a fresh context
+      const modelPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
+      const llamaContext = await initLlama({
+        model: modelPath,
+        use_mlock: false,
+        n_ctx: 512, 
+      });
+      
+      setContext(llamaContext);
+      const loc = await getCurrentLocation();
+      setLocation(loc);
+      
+      setMessages([
+        {
+          id: Date.now().toString(),
+          text: `Session reset. Clara is ready at ${loc?.address || 'your location'}.`,
+          sender: 'ai',
+          timestamp: new Date(),
+        },
+      ]);
+    } catch (error) {
+      console.error('Reset error:', error);
+      Alert.alert("Error", "Failed to reset session.");
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -155,8 +294,8 @@ const ChatScreen = ({ navigation }: any) => {
             <Text style={styles.statusText}>Online</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.menuButton}>
-          <Ionicons name="ellipsis-vertical" size={24} color="#fff" />
+        <TouchableOpacity style={styles.menuButton} onPress={handleClearSession}>
+          <Ionicons name="trash-outline" size={22} color="#ef4444" />
         </TouchableOpacity>
       </View>
 
