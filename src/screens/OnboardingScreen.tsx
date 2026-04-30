@@ -56,8 +56,9 @@ const QUESTIONS = [
 
 const TOTAL_STEPS = QUESTIONS.length; // 4
 
-export default function OnboardingScreen() {
-    const navigation = useNavigation<any>();
+export default function OnboardingScreen({ navigation: propNavigation }: any) {
+    const hookNavigation = useNavigation<any>();
+    const navigation = propNavigation || hookNavigation;
     const { speak, stop } = useTTS();
     const { transcript, isListening, startListening, stopListening } = useSTT();
     const [currentStep, setCurrentStep] = useState(0);

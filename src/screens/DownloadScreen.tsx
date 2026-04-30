@@ -28,12 +28,13 @@ const SafeIcon = ({ set, name, size, color }: any) => {
   }
 };
 
-export default function DownloadScreen() {
-  const navigation = useNavigation<any>();
+export default function DownloadScreen({ navigation: propNavigation }: any) {
+  const hookNavigation = useNavigation<any>();
+  const navigation = propNavigation || hookNavigation;
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'completed' | 'error'>('idle');
   const [progress, setProgress] = useState(0);
   const [downloadedMB, setDownloadedMB] = useState(0);
-  const [totalMB, setTotalMB] = useState(1300);
+  const [totalMB, setTotalMB] = useState(1600); // Updated to ~1.6GB for Gemma 2b Q4_K_M
 
   useEffect(() => {
     // Check if already downloaded
@@ -43,10 +44,18 @@ export default function DownloadScreen() {
         const exists = await RNFS.exists(destPath);
         if (exists) {
           const stat = await RNFS.stat(destPath);
-          setDownloadState('completed');
-          setProgress(100);
-          setDownloadedMB(stat.size / 1024 / 1024);
-          setTotalMB(stat.size / 1024 / 1024);
+          // Only mark as completed if it's over 1.4GB
+          if (stat.size > 1400000000) {
+            setDownloadState('completed');
+            setProgress(100);
+            setDownloadedMB(stat.size / 1024 / 1024);
+            setTotalMB(stat.size / 1024 / 1024);
+          } else {
+            // It's incomplete, let's allow re-download
+            setDownloadState('idle');
+            setProgress((stat.size / (1.6 * 1024 * 1024 * 1024)) * 100);
+            setDownloadedMB(stat.size / 1024 / 1024);
+          }
         }
       } catch (err) {
         console.error(err);
@@ -56,7 +65,8 @@ export default function DownloadScreen() {
   }, []);
 
   const startDownload = async () => {
-    const modelUrl = 'https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/google_gemma-4-E2B-it-Q4_K_M.gguf';
+    // Switching to Gemma-2-2B-It-Q4_K_M which is ~1.6GB
+    const modelUrl = 'https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf';
     const destPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
 
     setDownloadState('downloading');
@@ -85,12 +95,15 @@ export default function DownloadScreen() {
       });
 
       const finalRes = await result.promise;
-      if (finalRes.statusCode === 200) {
+      const stats = await RNFS.stat(destPath);
+      
+      if (finalRes.statusCode === 200 && stats.size > 1400000000) {
         setDownloadState('completed');
         setProgress(100);
       } else {
         setDownloadState('error');
-        Alert.alert('Download Failed', 'Server returned ' + finalRes.statusCode);
+        const reason = stats.size <= 1400000000 ? 'Incomplete download' : 'Server returned ' + finalRes.statusCode;
+        Alert.alert('Download Failed', reason);
       }
     } catch (err: any) {
       console.error('Download error:', err);
@@ -140,7 +153,7 @@ export default function DownloadScreen() {
               <SafeIcon set="MaterialCommunityIcons" name="cpu-64-bit" size={32} color="#f0abfc" />
             </View>
 
-            <Text style={styles.cardTitle}>Gemma 4 E2B (~1.3GB)</Text>
+            <Text style={styles.cardTitle}>Gemma 2 2B (~1.6GB)</Text>
             <Text style={styles.cardSubtitle}>
               Enhanced natural language processing & vision-to-speech engine.
             </Text>

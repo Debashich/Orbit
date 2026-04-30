@@ -13,6 +13,7 @@ import * as Icons from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTTS } from '../hooks/useTTS';
 import { useSTT } from '../hooks/useSTT';
+import { useNavigation } from '@react-navigation/native';
 
 const { width } = Dimensions.get('window');
 
@@ -36,7 +37,9 @@ interface Message {
   footer?: string;
 }
 
-export default function HomeScreen({ navigation }: any) {
+export default function HomeScreen({ navigation: propNavigation }: any) {
+  const hookNavigation = useNavigation<any>();
+  const navigation = propNavigation || hookNavigation;
   const { speak, stop } = useTTS();
   const { transcript, isListening, startListening, stopListening } = useSTT();
   const [messages, setMessages] = useState<Message[]>([]);

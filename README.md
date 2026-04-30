@@ -8,22 +8,25 @@ The project has established its core navigation, user profile management, and mo
 
 ### Core Features Implemented:
 - **Onboarding Workflow**: A multi-step process collecting vital user data (height, guidance preference, etc.) to tailor the AI experience.
-- **Local Model Management**: 
-    - Automated download of the **Gemma 2b (Quantized GGUF)** model directly from HuggingFace.
-    - Real-time download tracking and file system persistence using `react-native-fs`.
-    - On-device storage validation to prevent redundant downloads.
+- **On-Device LLM Integration**:
+    - Full integration of **Gemma 2b (Quantized GGUF)** using `llama.rn`.
+    - Local execution of prompts with streaming responses.
+    - Automated model download and persistence layer.
+- **Location Ingestion System**: 
+    - Real-time location tracking using `expo-location`.
+    - Dynamic location context provided to the AI for spatially-aware responses.
 - **Speech-to-Text (STT)**: Integrated `expo-speech-recognition` to convert user voice input into prompts.
 - **Text-to-Speech (TTS)**: Integrated `expo-speech` to read AI responses back to the user in real-time.
 - **High-Fidelity UI**: 
     - Modern dark-themed interface with interactive gradients and waveform animations.
     - Responsive chat-style interface for AI-user dialogue with history support.
-    - Accessibility-focused layout designed for voice-first interactions.
-- **Local Data Persistence**: Profile management via `AsyncStorage` (migrating to `expo-sqlite`).
+- **Local Data Persistence**: Profile management via `AsyncStorage`.
 
 ## Tech Stack
 - **Framework**: React Native (Expo)
 - **Language**: TypeScript
 - **AI Engine**: `llama.rn` (Local GGUF execution)
+- **Location**: `expo-location`
 - **Voice Recognition**: `expo-speech-recognition`
 - **Speech Synthesis**: `expo-speech`
 - **Navigation**: React Navigation (Static API)
@@ -39,6 +42,7 @@ The project has established its core navigation, user profile management, and mo
 - `src/services/speech/`:
   - `stt.ts`: Speech-to-text service implementation.
   - `tts.ts`: Text-to-speech service implementation.
+- `src/services/location.ts`: Location ingestion service.
 - `src/hooks/`:
   - `useSTT.ts`: Hook for voice input management.
   - `useTTS.ts`: Hook for speech output management.
@@ -48,10 +52,9 @@ The project has established its core navigation, user profile management, and mo
 
 The project is moving toward full **On-Device Intelligence**:
 
-1.  **Full LLM Integration**: Fully wire the `llama.rn` context to process prompts locally using the downloaded `.gguf` model (currently simulating responses).
-2.  **Vision Integration**: Add camera capabilities to provide real-time environment descriptions (using vision-capable models).
-3.  **Local Memory (RAG)**: Implement long-term AI memory using `expo-sqlite` to allow Clara to remember user preferences and context across sessions.
-4.  **Audio Customization**: Allow users to customize Clara's voice profile (pitch, rate, and accent).
+1.  **Vision Integration**: Add camera capabilities to provide real-time environment descriptions (using vision-capable models).
+2.  **Local Memory (RAG)**: Implement long-term AI memory using `expo-sqlite` to allow Clara to remember user preferences and context across sessions.
+3.  **Audio Customization**: Allow users to customize Clara's voice profile (pitch, rate, and accent).
 
 ## Getting Started
 1. `npm install`
