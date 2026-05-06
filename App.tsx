@@ -1,30 +1,80 @@
 import React, { useEffect } from 'react';
-import { createStaticNavigation } from '@react-navigation/native';
+import { View, ActivityIndicator } from 'react-native';
+import { createStaticNavigation, useNavigation } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import RNFS from 'react-native-fs';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import DownloadScreen from './src/screens/DownloadScreen';
 import HomeScreen from './src/screens/HomeScreen';
-import ChatScreen from './src/screens/ChatScreen';
-import { getUserProfile, initDatabase, saveUserProfile } from './database/db';
+import { getUserProfile, initDatabase } from './database/db';
+
+function BootScreen() {
+  const navigation = useNavigation<any>();
+
+  useEffect(() => {
+    const checkState = async () => {
+      try {
+        await initDatabase();
+        
+        // 1. Check if user profile exists
+        const profile = await getUserProfile();
+        // Fallback safety check: if profile is 'test', treat it as no profile so user can actually onboard.
+        if (!profile || profile.height === 'test') {
+          navigation.replace('Onboarding');
+          return;
+        }
+
+        // 2. Check if the model is downloaded
+        const modelPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
+        const exists = await RNFS.exists(modelPath);
+        if (!exists) {
+          navigation.replace('Download');
+          return;
+        }
+
+        const stats = await RNFS.stat(modelPath);
+        if (stats.size < 1400000000) { 
+          // If the model is incomplete/corrupted
+          navigation.replace('Download');
+          return;
+        }
+
+        // 3. If both exist, go straight to Home
+        navigation.replace('Home');
+      } catch (error) {
+        console.error('Boot error:', error);
+        navigation.replace('Onboarding'); // Fallback route
+      }
+    };
+
+    checkState();
+  }, [navigation]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#0f111a', justifyContent: 'center', alignItems: 'center' }}>
+      <ActivityIndicator size="large" color="#d946ef" />
+    </View>
+  );
+}
 
 const RootStack = createNativeStackNavigator({
-  initialRouteName: 'Onboarding',
+  initialRouteName: 'Boot',
   screens: {
+    Boot: {
+      screen: BootScreen,
+      options: { headerShown: false },
+    },
     Onboarding: {
       screen: OnboardingScreen,
-      options: { headerShown: false },
+      options: { headerShown: false, animation: 'fade' },
     },
     Download: {
       screen: DownloadScreen,
-      options: { headerShown: false },
+      options: { headerShown: false, animation: 'fade' },
     },
     Home: {
       screen: HomeScreen,
-      options: { headerShown: false },
-    },
-    Chat: {
-      screen: ChatScreen,
-      options: { headerShown: false },
+      options: { headerShown: false, animation: 'fade' },
     },
   },
 });
@@ -32,27 +82,5 @@ const RootStack = createNativeStackNavigator({
 const Navigation = createStaticNavigation(RootStack);
 
 export default function App() {
-  useEffect(() => {
-    const setup = async () => {
-      console.log(' Starting DB init...');
-      await initDatabase();
-      console.log(' DB init done');
-
-      // Test save directly
-      const result = await saveUserProfile({
-        height: 'test',
-        weight: 'test',
-        visionImpairment: 'test',
-        guidanceType: 'test',
-      });
-      console.log(' Save result:', result);
-
-      // Test read
-      const profile = await getUserProfile();
-      console.log(' Profile:', profile);
-    };
-    setup();
-  }, []);
-
   return <Navigation />;
 }

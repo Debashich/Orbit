@@ -1,4 +1,5 @@
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
+import { PermissionsAndroid, Platform } from "react-native";
 
 let activeListeners: Array<{ remove: () => void }> = [];
 let isListeningNow = false;
@@ -11,6 +12,21 @@ const clearListeners = () => {
 export const checkMicrophonePermission = async () => {
   try {
     console.log('[STT] 🔐 Checking microphone permission...');
+    if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        {
+          title: 'Microphone Permission',
+          message: 'Clara needs access to your microphone so you can talk to her.',
+          buttonNeutral: 'Ask Me Later',
+          buttonNegative: 'Cancel',
+          buttonPositive: 'OK',
+        }
+      );
+      console.log('[STT] 🔐 PermissionsAndroid result:', granted);
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    }
+
     const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     console.log('[STT] 🔐 Permission result:', result.granted, 'Status:', result.status);
     return result.granted;
@@ -33,12 +49,17 @@ export const startVoice = async (onResult: (text: string) => void, onEnd: () => 
     clearListeners();
     isListeningNow = true;
 
-    const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-    console.log('[STT] 📋 Permission result:', result.granted, 'Status:', result.status);
+    let hasPermission = false;
+    if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+      hasPermission = granted === PermissionsAndroid.RESULTS.GRANTED;
+    } else {
+      const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      hasPermission = result.granted;
+    }
     
-    if (!result.granted) {
+    if (!hasPermission) {
       console.warn('[STT] ❌ Microphone permission DENIED. User must grant permission in Android Settings.');
-      console.warn('[STT] ❌ Status:', result.status);
       isListeningNow = false;
       onEnd();
       return;

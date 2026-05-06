@@ -16,13 +16,12 @@ export const getCurrentLocation = async (): Promise<LocationData | null> => {
 
     let location = null;
     try {
-      // Try to get current position with a timeout
+      // Try to get current position quickly, using lower accuracy which works better indoors/on emulators
       location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-        timeInterval: 5000,
+        accuracy: Location.Accuracy.Low,
       });
     } catch (e) {
-      console.warn('Failed to get current position, trying last known position', e);
+      // Silently fall back to last known location without throwing loud warnings
       location = await Location.getLastKnownPositionAsync({});
     }
 

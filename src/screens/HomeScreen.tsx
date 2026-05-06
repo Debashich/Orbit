@@ -14,6 +14,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useTTS } from '../hooks/useTTS';
 import { useSTT } from '../hooks/useSTT';
 import { useNavigation } from '@react-navigation/native';
+import { initLlama, LlamaContext } from 'llama.rn';
+import RNFS from 'react-native-fs';
+import { getCurrentLocation, LocationData } from '../services/location';
 
 const { width } = Dimensions.get('window');
 
@@ -32,9 +35,9 @@ const WAVE_HEIGHTS = [15, 25, 45, 60, 45, 65, 45, 55, 35, 20, 15];
 
 interface Message {
   id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  footer?: string;
+  text: string;
+  sender: 'user' | 'ai';
+  timestamp: Date;
 }
 
 export default function HomeScreen({ navigation: propNavigation }: any) {
@@ -47,19 +50,71 @@ export default function HomeScreen({ navigation: propNavigation }: any) {
   const [isGenerating, setIsGenerating] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
+  const [context, setContext] = useState<LlamaContext | null>(null);
+  const contextRef = useRef<LlamaContext | null>(null);
+  const [location, setLocation] = useState<LocationData | null>(null);
+
+  // Sync ref with state
   useEffect(() => {
-    setIsInitializing(false);
+    contextRef.current = context;
+  }, [context]);
+
+  useEffect(() => {
+    const initializeApp = async () => {
+      try {
+        const loc = await getCurrentLocation();
+        setLocation(loc);
+
+        const modelPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
+        const exists = await RNFS.exists(modelPath);
+        
+        if (!exists) {
+          console.error("Model not found on HomeScreen load.");
+          return;
+        }
+
+        const llamaContext = await initLlama({
+          model: modelPath,
+          use_mlock: false,
+          n_ctx: 512,
+        });
+        
+        setContext(llamaContext);
+        setIsInitializing(false);
+        
+        setMessages([
+          {
+            id: '1',
+            text: `Hello! I am Clara. I've detected your location as ${loc?.address || 'unknown'}. How can I help you today?`,
+            sender: 'ai',
+            timestamp: new Date(),
+          },
+        ]);
+        speak(`Hello! I am Clara. How can I help you today?`);
+      } catch (error) {
+        console.error('Initialization error:', error);
+        setIsInitializing(false); // don't block forever
+      }
+    };
+
+    initializeApp();
+
     return () => {
       stop();
+      if (contextRef.current) {
+        contextRef.current.release();
+      }
     };
   }, []);
 
   useEffect(() => {
     // Auto-scroll to bottom when messages change
     if (scrollViewRef.current) {
-      scrollViewRef.current.scrollToEnd({ animated: true });
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
     }
-  }, [messages]);
+  }, [messages, isGenerating]);
 
   // Handle automatic sending when transcript is captured
   useEffect(() => {
@@ -89,30 +144,67 @@ export default function HomeScreen({ navigation: propNavigation }: any) {
   };
 
   const sendMessage = async (text: string) => {
-    if (isGenerating || !text.trim()) return;
+    if (isGenerating || !text.trim() || !context) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
-      role: 'user',
-      content: text,
+      text: text.trim(),
+      sender: 'user',
+      timestamp: new Date(),
     };
 
     setMessages(prev => [...prev, userMsg]);
     setIsGenerating(true);
 
     const assistantMsgId = (Date.now() + 1).toString();
-    let fullResponse = '';
+    const newAiMessage: Message = {
+      id: assistantMsgId,
+      text: '',
+      sender: 'ai',
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, newAiMessage]);
 
     try {
-      fullResponse = 'I heard you, but local AI is currently disabled. Enable model initialization to get generated replies.';
-      setMessages(prev => [
-        ...prev,
-        { id: assistantMsgId, role: 'assistant', content: fullResponse, footer: 'SYSTEM' },
-      ]);
+      // Refresh location for the most up-to-date context
+      const currentLoc = await getCurrentLocation();
+      setLocation(currentLoc);
+
+      const locationContext = currentLoc 
+        ? `User is currently at ${currentLoc.address} (Lat: ${currentLoc.latitude}, Lon: ${currentLoc.longitude}). `
+        : "User location is unavailable. ";
+
+      const prompt = `System: You are Clara, a helpful AI assistant. ${locationContext}Respond concisely.
+User: ${userMsg.text}
+AI:`;
+
+      let fullResponse = '';
+      await context.completion(
+        {
+          prompt,
+          n_predict: 400,
+          stop: ['User:', 'System:'],
+        },
+        (res) => {
+          fullResponse += res.token;
+          setMessages((prev) => 
+            prev.map((msg) => 
+              msg.id === assistantMsgId ? { ...msg, text: fullResponse.trim() } : msg
+            )
+          );
+        }
+      );
       
-      speak(fullResponse);
+      if (fullResponse.trim()) {
+        speak(fullResponse.trim());
+      }
     } catch (err) {
       console.error('Completion error:', err);
+      setMessages((prev) => 
+        prev.map((msg) => 
+          msg.id === assistantMsgId ? { ...msg, text: "Sorry, I encountered an error while thinking." } : msg
+        )
+      );
     } finally {
       setIsGenerating(false);
     }
@@ -159,21 +251,42 @@ export default function HomeScreen({ navigation: propNavigation }: any) {
             </View>
           )}
 
-          {messages.map((msg) => (
-            msg.role === 'user' ? (
-              <View key={msg.id} style={styles.userBubble}>
-                <Text style={styles.userText}>{msg.content}</Text>
-              </View>
-            ) : (
-              <View key={msg.id} style={styles.aiBubbleWrapper}>
-                <View style={styles.aiGlow} />
-                <View style={styles.aiBubble}>
-                  <Text style={styles.aiText}>{msg.content}</Text>
-                  {msg.footer && <Text style={styles.aiFooter}>{msg.footer}</Text>}
+          {messages.map((msg) => {
+            const isUser = msg.sender === 'user';
+            return (
+              <View
+                key={msg.id}
+                style={[
+                  styles.messageContainer,
+                  isUser ? styles.userMessageContainer : styles.aiMessageContainer,
+                ]}
+              >
+                {!isUser && (
+                  <View style={styles.aiAvatar}>
+                    <LinearGradient
+                      colors={['#a855f7', '#db2777']}
+                      style={styles.avatarGradient}
+                    >
+                      <Icons.Ionicons name="sparkles" size={14} color="white" />
+                    </LinearGradient>
+                  </View>
+                )}
+                <View
+                  style={[
+                    styles.messageBubble,
+                    isUser ? styles.userBubble : styles.aiBubble,
+                  ]}
+                >
+                  <Text style={[styles.messageText, isUser ? styles.userText : styles.aiText]}>
+                    {msg.text}
+                  </Text>
+                  <Text style={styles.timestamp}>
+                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
                 </View>
               </View>
-            )
-          ))}
+            );
+          })}
 
           {/* Add bottom padding to allow scrolling past the fixed UI */}
           <View style={{ height: 200 }} />
@@ -207,18 +320,18 @@ export default function HomeScreen({ navigation: propNavigation }: any) {
             <SafeIcon set="MaterialCommunityIcons" name="history" size={28} color="#94a3b8" />
           </TouchableOpacity>
 
-          {/* GLOWING CHAT BUTTON */}
+          {/* GLOWING MIC BUTTON */}
           <View style={styles.tabMicWrapper}>
             <View style={styles.micGlow} />
             <TouchableOpacity 
               activeOpacity={0.8} 
-              onPress={() => navigation.navigate('Chat')}
+              onPress={handleMicPress}
             >
               <LinearGradient
                 colors={isListening ? ['#ef4444', '#b91c1c'] : ['#a855f7', '#db2777']}
                 style={[styles.tabMicButton, isGenerating && { opacity: 0.5 }]}
               >
-                <SafeIcon set="Ionicons" name="chatbubble-ellipses" size={32} color="white" />
+                <SafeIcon set="Ionicons" name={isListening ? "stop" : "mic"} size={32} color="white" />
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -282,62 +395,57 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  userBubble: {
+  messageContainer: {
+    flexDirection: 'row',
+    marginBottom: 16,
+    maxWidth: '90%',
+  },
+  userMessageContainer: {
     alignSelf: 'flex-end',
-    backgroundColor: '#1c1e2d',
-    padding: 24,
-    borderRadius: 35,
-    borderBottomRightRadius: 10,
-    marginBottom: 24,
-    width: '90%',
   },
-  userText: {
-    color: '#e2e8f0',
-    fontSize: 20,
-    lineHeight: 30,
-  },
-  aiBubbleWrapper: {
+  aiMessageContainer: {
     alignSelf: 'flex-start',
-    marginBottom: 35,
-    width: '90%',
-    position: 'relative',
   },
-  aiGlow: {
-    position: 'absolute',
-    top: 5,
-    bottom: 5,
-    left: 5,
-    right: 5,
-    backgroundColor: '#d946ef',
-    opacity: 0.15,
-    borderRadius: 35,
-    shadowColor: '#d946ef',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 15,
-    elevation: 5,
+  aiAvatar: {
+    marginRight: 8,
+    alignSelf: 'flex-end',
+    marginBottom: 4,
+  },
+  avatarGradient: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  messageBubble: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 20,
+  },
+  userBubble: {
+    backgroundColor: '#3b82f6',
+    borderBottomRightRadius: 4,
   },
   aiBubble: {
-    backgroundColor: '#1a1625',
-    padding: 28,
-    borderRadius: 35,
-    borderBottomLeftRadius: 10,
-    borderColor: 'rgba(217, 70, 239, 0.1)',
-    borderWidth: 1,
+    backgroundColor: '#1e293b',
+    borderBottomLeftRadius: 4,
+  },
+  messageText: {
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  userText: {
+    color: '#fff',
   },
   aiText: {
-    color: '#fff',
-    fontSize: 20,
-    lineHeight: 30,
-    fontWeight: '400',
-    textAlign: 'center',
+    color: '#e2e8f0',
   },
-  aiFooter: {
-    color: '#94a3b8',
-    fontSize: 11,
-    marginTop: 15,
-    letterSpacing: 2,
-    fontWeight: '600',
+  timestamp: {
+    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.5)',
+    marginTop: 4,
+    alignSelf: 'flex-end',
   },
   fixedBottomContainer: {
     position: 'absolute',

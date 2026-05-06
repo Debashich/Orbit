@@ -18,8 +18,9 @@ The project has established its core navigation, user profile management, and mo
 - **Speech-to-Text (STT)**: Integrated `expo-speech-recognition` to convert user voice input into prompts.
 - **Text-to-Speech (TTS)**: Integrated `expo-speech` to read AI responses back to the user in real-time.
 - **High-Fidelity UI**: 
+    - Unified `HomeScreen` serving as the primary interaction hub.
     - Modern dark-themed interface with interactive gradients and waveform animations.
-    - Responsive chat-style interface for AI-user dialogue with history support.
+    - Seamless chat bubble integration overlaying the voice interface for real-time history.
 - **Local Data Persistence**: Profile management via `AsyncStorage`.
 
 ## Tech Stack
@@ -37,8 +38,7 @@ The project has established its core navigation, user profile management, and mo
 - `src/screens/`:
   - `OnboardingScreen.tsx`: User data collection.
   - `DownloadScreen.tsx`: Model acquisition and initialization.
-  - `HomeScreen.tsx`: Main interaction hub (Voice-first).
-  - `ChatScreen.tsx`: Traditional chat interface with message history.
+  - `HomeScreen.tsx`: Unified primary interface (Voice, Chat, and AI Engine initialized here).
 - `src/services/speech/`:
   - `stt.ts`: Speech-to-text service implementation.
   - `tts.ts`: Text-to-speech service implementation.
