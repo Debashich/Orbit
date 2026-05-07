@@ -34,27 +34,43 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'completed' | 'error'>('idle');
   const [progress, setProgress] = useState(0);
   const [downloadedMB, setDownloadedMB] = useState(0);
-  const [totalMB, setTotalMB] = useState(1600); // Updated to ~1.6GB for Gemma 2b Q4_K_M
+  const [totalMB, setTotalMB] = useState(1600); // Updated to ~1.6GB for Gemma 4 E2B Q4_K_M
+  const [downloadPhase, setDownloadPhase] = useState<'model' | 'mmproj'>('model');
 
   useEffect(() => {
-    // Check if already downloaded
+    // Check if already downloaded (both model and mmproj)
     const checkFile = async () => {
       try {
-        const destPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
-        const exists = await RNFS.exists(destPath);
-        if (exists) {
-          const stat = await RNFS.stat(destPath);
-          // Only mark as completed if it's over 1.4GB
-          if (stat.size > 1400000000) {
+        const modelPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
+        const mmprojPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-mmproj.gguf`;
+        const modelExists = await RNFS.exists(modelPath);
+        const mmprojExists = await RNFS.exists(mmprojPath);
+
+        if (modelExists && mmprojExists) {
+          const modelStat = await RNFS.stat(modelPath);
+          // Only mark as completed if model is over 1.4GB and mmproj exists
+          if (modelStat.size > 1400000000) {
             setDownloadState('completed');
             setProgress(100);
-            setDownloadedMB(stat.size / 1024 / 1024);
-            setTotalMB(stat.size / 1024 / 1024);
+            setDownloadedMB(modelStat.size / 1024 / 1024);
+            setTotalMB(modelStat.size / 1024 / 1024);
           } else {
-            // It's incomplete, let's allow re-download
             setDownloadState('idle');
-            setProgress((stat.size / (1.6 * 1024 * 1024 * 1024)) * 100);
-            setDownloadedMB(stat.size / 1024 / 1024);
+            setProgress((modelStat.size / (1.6 * 1024 * 1024 * 1024)) * 100);
+            setDownloadedMB(modelStat.size / 1024 / 1024);
+          }
+        } else if (modelExists) {
+          const modelStat = await RNFS.stat(modelPath);
+          if (modelStat.size > 1400000000) {
+            // Model downloaded but mmproj missing — need to download mmproj
+            setDownloadState('idle');
+            setDownloadPhase('mmproj');
+            setProgress(80);
+            setDownloadedMB(modelStat.size / 1024 / 1024);
+          } else {
+            setDownloadState('idle');
+            setProgress((modelStat.size / (1.6 * 1024 * 1024 * 1024)) * 100);
+            setDownloadedMB(modelStat.size / 1024 / 1024);
           }
         }
       } catch (err) {
@@ -64,14 +80,11 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
     checkFile();
   }, []);
 
-  const startDownload = async () => {
-    // Switching to Gemma-2-2B-It-Q4_K_M which is ~1.6GB
-    const modelUrl = 'https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf';
-    const destPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
-
-    setDownloadState('downloading');
-    setProgress(0);
-
+  const downloadFile = async (
+    url: string,
+    destPath: string,
+    onProgress: (percent: number, downloadedMB: number, totalMB: number) => void,
+  ): Promise<boolean> => {
     try {
       const exists = await RNFS.exists(destPath);
       if (exists) {
@@ -79,7 +92,7 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
       }
 
       const result = RNFS.downloadFile({
-        fromUrl: modelUrl,
+        fromUrl: url,
         toFile: destPath,
         background: true,
         discretionary: true,
@@ -88,23 +101,82 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
         },
         progress: (res) => {
           const percent = (res.bytesWritten / res.contentLength) * 100;
-          setProgress(percent);
-          setDownloadedMB(res.bytesWritten / 1024 / 1024);
+          onProgress(percent, res.bytesWritten / 1024 / 1024, res.contentLength / 1024 / 1024);
         },
         progressDivider: 1,
       });
 
       const finalRes = await result.promise;
-      const stats = await RNFS.stat(destPath);
-      
-      if (finalRes.statusCode === 200 && stats.size > 1400000000) {
-        setDownloadState('completed');
-        setProgress(100);
-      } else {
-        setDownloadState('error');
-        const reason = stats.size <= 1400000000 ? 'Incomplete download' : 'Server returned ' + finalRes.statusCode;
-        Alert.alert('Download Failed', reason);
+      return finalRes.statusCode === 200;
+    } catch (err: any) {
+      console.error('Download error:', err);
+      throw err;
+    }
+  };
+
+  const startDownload = async () => {
+    // Gemma 4 E2B model + multimodal projector for vision
+    const modelUrl = 'https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/google_gemma-4-E2B-it-Q4_K_M.gguf';
+    const mmprojUrl = 'https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/mmproj-google_gemma-4-E2B-it-f16.gguf';
+    const modelPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
+    const mmprojPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-mmproj.gguf`;
+
+    setDownloadState('downloading');
+    setProgress(0);
+
+    try {
+      // Phase 1: Download main model (skip if already complete)
+      const modelExists = await RNFS.exists(modelPath);
+      let modelComplete = false;
+      if (modelExists) {
+        const modelStat = await RNFS.stat(modelPath);
+        modelComplete = modelStat.size > 1400000000;
       }
+
+      if (!modelComplete) {
+        setDownloadPhase('model');
+        const modelSuccess = await downloadFile(modelUrl, modelPath, (percent, dlMB, tMB) => {
+          // Model is ~85% of total work
+          setProgress(percent * 0.85);
+          setDownloadedMB(dlMB);
+          setTotalMB(tMB);
+        });
+
+        if (!modelSuccess) {
+          setDownloadState('error');
+          Alert.alert('Download Failed', 'Failed to download the AI model.');
+          return;
+        }
+
+        const modelStats = await RNFS.stat(modelPath);
+        if (modelStats.size <= 1400000000) {
+          setDownloadState('error');
+          Alert.alert('Download Failed', 'Incomplete model download.');
+          return;
+        }
+      }
+
+      // Phase 2: Download mmproj (vision projector)
+      const mmprojExists = await RNFS.exists(mmprojPath);
+      if (!mmprojExists) {
+        setDownloadPhase('mmproj');
+        setProgress(85);
+        const mmprojSuccess = await downloadFile(mmprojUrl, mmprojPath, (percent, dlMB, tMB) => {
+          // mmproj is the remaining ~15%
+          setProgress(85 + (percent * 0.15));
+          setDownloadedMB(dlMB);
+          setTotalMB(tMB);
+        });
+
+        if (!mmprojSuccess) {
+          setDownloadState('error');
+          Alert.alert('Download Failed', 'Failed to download the vision projector.');
+          return;
+        }
+      }
+
+      setDownloadState('completed');
+      setProgress(100);
     } catch (err: any) {
       console.error('Download error:', err);
       setDownloadState('error');
@@ -153,9 +225,9 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
               <SafeIcon set="MaterialCommunityIcons" name="cpu-64-bit" size={32} color="#f0abfc" />
             </View>
 
-            <Text style={styles.cardTitle}>Gemma 2 2B (~1.6GB)</Text>
+            <Text style={styles.cardTitle}>Gemma 4 E2B (~1.8GB)</Text>
             <Text style={styles.cardSubtitle}>
-              Enhanced natural language processing & vision-to-speech engine.
+              Multimodal AI with vision & language — {downloadPhase === 'mmproj' ? 'downloading vision module...' : 'powers image analysis & conversation'}.
             </Text>
 
             {/* PROGRESS BAR */}
