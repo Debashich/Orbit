@@ -6,6 +6,7 @@ import RNFS from 'react-native-fs';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import DownloadScreen from './src/screens/DownloadScreen';
 import HomeScreen from './src/screens/HomeScreen';
+import CameraScreen from './src/screens/CameraScreen';
 import { getUserProfile, initDatabase } from './database/db';
 
 function BootScreen() {
@@ -26,8 +27,10 @@ function BootScreen() {
 
         // 2. Check if the model is downloaded
         const modelPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
+        const mmprojPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-mmproj.gguf`;
         const exists = await RNFS.exists(modelPath);
-        if (!exists) {
+        const mmprojExists = await RNFS.exists(mmprojPath);
+        if (!exists || !mmprojExists) {
           navigation.replace('Download');
           return;
         }
@@ -75,6 +78,10 @@ const RootStack = createNativeStackNavigator({
     Home: {
       screen: HomeScreen,
       options: { headerShown: false, animation: 'fade' },
+    },
+    Camera: {
+      screen: CameraScreen,
+      options: { headerShown: false, animation: 'slide_from_bottom' },
     },
   },
 });

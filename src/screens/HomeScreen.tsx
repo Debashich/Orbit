@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,16 +7,18 @@ import {
   Dimensions,
   ScrollView,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Icons from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTTS } from '../hooks/useTTS';
 import { useSTT } from '../hooks/useSTT';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { initLlama, LlamaContext } from 'llama.rn';
 import RNFS from 'react-native-fs';
 import { getCurrentLocation, LocationData } from '../services/location';
+import { isCameraCommand, extractCameraPrompt } from '../services/camera';
 
 const { width } = Dimensions.get('window');
 
@@ -38,11 +40,14 @@ interface Message {
   text: string;
   sender: 'user' | 'ai';
   timestamp: Date;
+  imageUri?: string;
 }
 
-export default function HomeScreen({ navigation: propNavigation }: any) {
+export default function HomeScreen({ navigation: propNavigation, route: propRoute }: any) {
   const hookNavigation = useNavigation<any>();
+  const hookRoute = useRoute<any>();
   const navigation = propNavigation || hookNavigation;
+  const route = propRoute || hookRoute;
   const { speak, stop } = useTTS();
   const { transcript, isListening, startListening, stopListening } = useSTT();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -53,6 +58,8 @@ export default function HomeScreen({ navigation: propNavigation }: any) {
   const [context, setContext] = useState<LlamaContext | null>(null);
   const contextRef = useRef<LlamaContext | null>(null);
   const [location, setLocation] = useState<LocationData | null>(null);
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+  const pendingImageRef = useRef<{ uri: string; prompt: string; command: string } | null>(null);
 
   // Sync ref with state
   useEffect(() => {
@@ -66,18 +73,30 @@ export default function HomeScreen({ navigation: propNavigation }: any) {
         setLocation(loc);
 
         const modelPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
-        const exists = await RNFS.exists(modelPath);
+        const mmprojPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-mmproj.gguf`;
+        const modelExists = await RNFS.exists(modelPath);
+        const mmprojExists = await RNFS.exists(mmprojPath);
         
-        if (!exists) {
+        if (!modelExists) {
           console.error("Model not found on HomeScreen load.");
           return;
         }
 
-        const llamaContext = await initLlama({
+        const llamaConfig: any = {
           model: modelPath,
           use_mlock: false,
           n_ctx: 512,
-        });
+        };
+
+        // Add multimodal projector for vision support if available
+        if (mmprojExists) {
+          llamaConfig.mmproj = mmprojPath;
+          console.log('[Home] mmproj found, vision mode enabled');
+        } else {
+          console.log('[Home] mmproj not found, text-only mode');
+        }
+
+        const llamaContext = await initLlama(llamaConfig);
         
         setContext(llamaContext);
         setIsInitializing(false);
@@ -116,14 +135,44 @@ export default function HomeScreen({ navigation: propNavigation }: any) {
     }
   }, [messages, isGenerating]);
 
+  // Handle captured image returned from CameraScreen
+  useEffect(() => {
+    const params = route.params;
+    if (params?.capturedImageUri && contextRef.current && !isAnalyzingImage) {
+      const imageUri = params.capturedImageUri;
+      const analysisPrompt = params.analysisPrompt || 'Describe what you see in this image.';
+      const cameraCommand = params.cameraCommand || 'capture image';
+      
+      // Clear the params to prevent re-processing
+      navigation.setParams({ capturedImageUri: undefined, analysisPrompt: undefined, cameraCommand: undefined });
+      
+      // Process the captured image
+      analyzeImage(imageUri, analysisPrompt, cameraCommand);
+    }
+  }, [route.params?.capturedImageUri, isAnalyzingImage]);
+
   // Handle automatic sending when transcript is captured
   useEffect(() => {
-    if (transcript && !isListening && !isGenerating) {
+    if (transcript && !isListening && !isGenerating && !isAnalyzingImage) {
       console.log('--- Triggering Send Message ---');
       console.log('Final Transcript:', transcript);
+      
+      // Check if this is a camera command
+      if (isCameraCommand(transcript)) {
+        console.log('[Home] Camera command detected:', transcript);
+        const analysisPrompt = extractCameraPrompt(transcript);
+        speak('Opening camera now', () => {
+          navigation.navigate('Camera', {
+            command: transcript,
+            analysisPrompt: analysisPrompt,
+          });
+        });
+        return;
+      }
+      
       sendMessage(transcript);
     }
-  }, [transcript, isListening, isGenerating]);
+  }, [transcript, isListening, isGenerating, isAnalyzingImage]);
 
   const handleMicPress = async () => {
     if (isGenerating) return;
@@ -210,6 +259,77 @@ AI:`;
     }
   };
 
+  // Analyze a captured image using the multimodal model
+  const analyzeImage = async (imageUri: string, analysisPrompt: string, cameraCommand: string) => {
+    if (!contextRef.current || isAnalyzingImage) return;
+
+    setIsAnalyzingImage(true);
+    
+    // Add user message with image
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      text: cameraCommand,
+      sender: 'user',
+      timestamp: new Date(),
+      imageUri: imageUri,
+    };
+    setMessages(prev => [...prev, userMsg]);
+    setIsGenerating(true);
+
+    const assistantMsgId = (Date.now() + 1).toString();
+    const newAiMessage: Message = {
+      id: assistantMsgId,
+      text: '',
+      sender: 'ai',
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, newAiMessage]);
+
+    try {
+      speak('Analyzing the image now...');
+
+      const prompt = `System: You are Clara, a helpful AI assistant with vision capabilities. Analyze the provided image carefully and respond to the user's request.
+User: ${analysisPrompt}
+AI:`;
+
+      let fullResponse = '';
+      await contextRef.current.completion(
+        {
+          prompt,
+          n_predict: 500,
+          stop: ['User:', 'System:'],
+          media_paths: [imageUri],
+        } as any,
+        (res) => {
+          fullResponse += res.token;
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMsgId ? { ...msg, text: fullResponse.trim() } : msg
+            )
+          );
+        }
+      );
+
+      if (fullResponse.trim()) {
+        await stop();
+        speak(fullResponse.trim());
+      }
+    } catch (err) {
+      console.error('[Home] Image analysis error:', err);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMsgId
+            ? { ...msg, text: 'Sorry, I could not analyze the image. Please try again.' }
+            : msg
+        )
+      );
+      speak('Sorry, I could not analyze the image. Please try again.');
+    } finally {
+      setIsGenerating(false);
+      setIsAnalyzingImage(false);
+    }
+  };
+
   if (isInitializing) {
     return (
       <View style={[styles.container, styles.center]}>
@@ -277,6 +397,13 @@ AI:`;
                     isUser ? styles.userBubble : styles.aiBubble,
                   ]}
                 >
+                  {msg.imageUri && (
+                    <Image
+                      source={{ uri: msg.imageUri }}
+                      style={styles.capturedImage}
+                      resizeMode="cover"
+                    />
+                  )}
                   <Text style={[styles.messageText, isUser ? styles.userText : styles.aiText]}>
                     {msg.text}
                   </Text>
@@ -307,7 +434,7 @@ AI:`;
             ))}
           </View>
           <Text style={styles.listeningText}>
-            {isGenerating ? 'CLARA IS THINKING...' : (transcript || 'Say something...')}
+            {isAnalyzingImage ? 'ANALYZING IMAGE...' : isGenerating ? 'CLARA IS THINKING...' : (transcript || 'Say something...')}
           </Text>
         </View>
 
@@ -430,6 +557,12 @@ const styles = StyleSheet.create({
   aiBubble: {
     backgroundColor: '#1e293b',
     borderBottomLeftRadius: 4,
+  },
+  capturedImage: {
+    width: '100%',
+    height: 180,
+    borderRadius: 12,
+    marginBottom: 8,
   },
   messageText: {
     fontSize: 16,
