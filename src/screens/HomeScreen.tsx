@@ -135,6 +135,16 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
     }
   }, [messages, isGenerating]);
 
+  const openCamera = useCallback(
+    (command: string, analysisPrompt: string) => {
+      navigation.navigate('Camera', {
+        command,
+        analysisPrompt,
+      });
+    },
+    [navigation]
+  );
+
   // Handle captured image returned from CameraScreen
   useEffect(() => {
     const params = route.params;
@@ -162,10 +172,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         console.log('[Home] Camera command detected:', transcript);
         const analysisPrompt = extractCameraPrompt(transcript);
         speak('Opening camera now', () => {
-          navigation.navigate('Camera', {
-            command: transcript,
-            analysisPrompt: analysisPrompt,
-          });
+          openCamera(transcript, analysisPrompt);
         });
         return;
       }
@@ -191,6 +198,17 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       }, 100);
     });
   };
+
+  const handleManualCameraPress = useCallback(async () => {
+    if (isGenerating || isAnalyzingImage) return;
+    if (isListening) {
+      await stopListening();
+    }
+    await stop();
+    speak('Opening camera now', () => {
+      openCamera('Capture image', 'Describe what you see in this image.');
+    });
+  }, [isGenerating, isAnalyzingImage, isListening, stopListening, stop, speak, openCamera]);
 
   const sendMessage = async (text: string) => {
     if (isGenerating || !text.trim() || !context) return;
@@ -463,6 +481,10 @@ AI:`;
             </TouchableOpacity>
           </View>
 
+          <TouchableOpacity style={styles.tabIcon} onPress={handleManualCameraPress}>
+            <SafeIcon set="Ionicons" name="camera-outline" size={26} color="#94a3b8" />
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.tabIcon}>
             <SafeIcon set="Ionicons" name="settings-sharp" size={26} color="#94a3b8" />
           </TouchableOpacity>
@@ -648,4 +670,3 @@ const styles = StyleSheet.create({
     elevation: 15,
   },
 });
-
