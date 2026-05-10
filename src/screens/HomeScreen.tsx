@@ -636,10 +636,13 @@ AI:`;
                 style={[styles.modalButton, styles.modalButtonPrimary]} 
                 onPress={async () => {
                   const profile = await getUserProfile();
-                  if (profile) {
-                    await saveUserProfile({ ...profile, language: settingsLanguage || 'English' });
-                    Alert.alert('Success', 'Language updated!');
+                  if (!profile) {
+                    Alert.alert('Unable to save', 'No user profile was found. Please complete onboarding or recreate your profile before updating settings.');
+                    return;
                   }
+
+                  await saveUserProfile({ ...profile, language: settingsLanguage || 'English' });
+                  Alert.alert('Success', 'Language updated!');
                   setIsSettingsOpen(false);
                 }}
               >
