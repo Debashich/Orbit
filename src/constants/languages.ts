@@ -19,6 +19,7 @@ const LANGUAGE_PATTERNS: Array<{ pattern: RegExp; promptName: string; code: stri
   { pattern: /\b(mr|mr-in|marathi)\b|मराठी/i, promptName: 'Marathi', code: 'mr-IN' },
   { pattern: /\b(gu|gu-in|gujarati)\b|ગુજરાતી/i, promptName: 'Gujarati', code: 'gu-IN' },
 ];
+const LANGUAGE_BY_CODE = new Map(LANGUAGE_PATTERNS.map((language) => [language.code, language]));
 
 const normalizeLanguageInput = (languageName?: string): string => {
   if (typeof languageName !== 'string' || !languageName) return '';
@@ -31,13 +32,11 @@ const normalizeLanguageInput = (languageName?: string): string => {
 
 const resolveLanguage = (languageName?: string) => {
   const normalized = normalizeLanguageInput(languageName);
-  const bcp47Match = normalized.match(/^([a-z]{2,3})-([a-z]{2})$/i);
+  const bcp47Match = normalized.match(/^([a-z]{2})-([a-z]{2})$/);
   if (bcp47Match) {
-    const canonicalCode = `${bcp47Match[1].toLowerCase()}-${bcp47Match[2].toUpperCase()}`;
-    const knownLanguage = LANGUAGE_PATTERNS.find(
-      ({ code }) => code.toLowerCase() === canonicalCode.toLowerCase()
-    );
-    return knownLanguage || { ...DEFAULT_LANGUAGE, code: canonicalCode };
+    const canonicalCode = `${bcp47Match[1]}-${bcp47Match[2].toUpperCase()}`;
+    const knownLanguage = LANGUAGE_BY_CODE.get(canonicalCode);
+    return knownLanguage || DEFAULT_LANGUAGE;
   }
 
   const match = LANGUAGE_PATTERNS.find(({ pattern }) => pattern.test(normalized));
