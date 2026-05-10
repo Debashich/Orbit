@@ -27,6 +27,7 @@ import { isCameraCommand, extractCameraPrompt } from '../services/camera';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { getUserProfile, saveUserProfile } from '../../database/db';
 import { getSafePromptLanguageName } from '../constants/languages';
+import { refreshTTSLanguage } from '../services/speech/tts';
 
 const { width } = Dimensions.get('window');
 
@@ -642,6 +643,7 @@ AI:`;
                   }
 
                   await saveUserProfile({ ...profile, language: settingsLanguage || 'English' });
+                  await refreshTTSLanguage(settingsLanguage || 'English');
                   Alert.alert('Success', 'Language updated!');
                   setIsSettingsOpen(false);
                 }}
