@@ -46,12 +46,12 @@ export const extractCameraPrompt = (text: string): string => {
 
   // If user asks "what do you see" / "what can you see", keep it direct
   if (lower.includes('what do you see') || lower.includes('what can you see')) {
-    return 'Describe what you see in this image in detail.';
+    return 'Describe the surroundings.';
   }
 
   // If user says "identify" or "recognize" or "detect"
   if (lower.includes('identify') || lower.includes('recognize') || lower.includes('detect')) {
-    return `Identify and describe the objects in this image. ${text}`;
+    return `Identify objects in this image. ${text}`;
   }
 
   // For "capture X", "take a photo of X", "scan X" etc., extract the subject
@@ -68,10 +68,10 @@ export const extractCameraPrompt = (text: string): string => {
   for (const pattern of subjectPatterns) {
     const match = lower.match(pattern);
     if (match && match[1] && match[1].trim().length > 0) {
-      return `Describe and analyze the following in this image: ${match[1].trim()}`;
+      return `Locate and describe: ${match[1].trim()}`;
     }
   }
 
   // Default fallback
-  return 'Describe what you see in this image. Provide a detailed analysis.';
+  return 'Describe the scene.';
 };

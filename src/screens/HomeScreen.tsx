@@ -22,6 +22,7 @@ import { useSTT } from '../hooks/useSTT';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { initLlama, LlamaContext } from 'llama.rn';
 import RNFS from 'react-native-fs';
+import { ASSISTIVE_VISION_PROTOCOL, INTENT_CLASSIFICATION_PROMPT, Intent } from '../constants/prompts';
 import { getCurrentLocation, LocationData } from '../services/location';
 import { isCameraCommand, extractCameraPrompt } from '../services/camera';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -43,6 +44,16 @@ const SafeIcon = ({ set, name, size, color }: any) => {
 };
 
 const WAVE_HEIGHTS = [15, 25, 45, 60, 45, 65, 45, 55, 35, 20, 15];
+
+const isValidResponse = (text: string): boolean => {
+  const lowerText = text.toLowerCase();
+  // Check for navigation keywords and actionable instructions
+  const hasLocation = lowerText.includes('ahead') || lowerText.includes('left') || lowerText.includes('right') || lowerText.includes('center');
+  const hasAction = lowerText.includes('stop') || lowerText.includes('walk') || lowerText.includes('duck') || lowerText.includes('move') || lowerText.includes('proceed') || lowerText.includes('clear');
+  const isClear = lowerText.includes('path clear');
+  
+  return (hasLocation && hasAction) || isClear;
+};
 
 interface Message {
   id: string;
@@ -71,11 +82,39 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   const contextRef = useRef<LlamaContext | null>(null);
   const [location, setLocation] = useState<LocationData | null>(null);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+  const [lastIntent, setLastIntent] = useState<Intent | null>(null);
   const pendingImageRef = useRef<{ uri: string; prompt: string; command: string } | null>(null);
   const lastProcessedTranscript = useRef<string>('');
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsLanguage, setSettingsLanguage] = useState('');
+  const classifyIntent = async (text: string): Promise<Intent> => {
+    if (!context) return 'UNCERTAIN';
+    
+    // Quick keyword override for safety/common cases
+    const lower = text.toLowerCase();
+    if (lower.match(/\b(safe|walk|ahead|blocking|door|car|clear|see|look|identify)\b/)) {
+      return 'VISION_REQUIRED';
+    }
+
+    const prompt = `<start_of_turn>user\n${INTENT_CLASSIFICATION_PROMPT.replace('{query}', text)}<end_of_turn>\n<start_of_turn>model\n`;
+    
+    let result = '';
+    await context.completion({
+      prompt,
+      n_predict: 20,
+      stop: ['<end_of_turn>', '\n'],
+      temperature: 0.1,
+    }, (res) => {
+      result += res.token;
+    });
+
+    const intent = result.trim().toUpperCase();
+    if (intent.includes('VISION_REQUIRED')) return 'VISION_REQUIRED';
+    if (intent.includes('VISION_OPTIONAL')) return 'VISION_OPTIONAL';
+    if (intent.includes('NON_VISION')) return 'NON_VISION';
+    return 'UNCERTAIN';
+  };
 
   // Sync ref with state
   useEffect(() => {
@@ -186,24 +225,41 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   // Handle automatic sending when transcript is captured
   useEffect(() => {
     if (transcript && transcript !== lastProcessedTranscript.current && !isListening && !isGenerating && !isAnalyzingImage) {
-      console.log('--- Triggering Send Message ---');
+      console.log('--- Triggering Intent Check ---');
       console.log('Final Transcript:', transcript);
       
       lastProcessedTranscript.current = transcript;
       
-      // Check if this is a camera command
-      if (isCameraCommand(transcript)) {
-        console.log('[Home] Camera command detected:', transcript);
-        const analysisPrompt = extractCameraPrompt(transcript);
-        speak('Opening camera now', () => {
-          openCamera(transcript, analysisPrompt);
-        });
-        return;
-      }
-      
-      sendMessage(transcript);
+      const processIntent = async () => {
+        const intent = await classifyIntent(transcript);
+        setLastIntent(intent);
+        console.log('[Home] Detected intent:', intent);
+
+        if (intent === 'VISION_REQUIRED') {
+          console.log('[Home] Smart camera trigger');
+          const analysisPrompt = extractCameraPrompt(transcript);
+          speak('Checking surroundings.', () => {
+            openCamera(transcript, analysisPrompt);
+          });
+          return;
+        }
+        
+        // Handle "Yes" to VISION_OPTIONAL or UNCERTAIN follow-ups
+        const lower = transcript.toLowerCase();
+        if ((lower === 'yes' || lower === 'yeah' || lower === 'sure' || lower === 'do it') && 
+            (lastIntent === 'VISION_OPTIONAL' || lastIntent === 'UNCERTAIN')) {
+          speak('Opening camera.', () => {
+            openCamera('Looking at surroundings', 'Describe the scene.');
+          });
+          return;
+        }
+
+        sendMessage(transcript, intent);
+      };
+
+      processIntent();
     }
-  }, [transcript, isListening, isGenerating, isAnalyzingImage]);
+  }, [transcript, isListening, isGenerating, isAnalyzingImage, lastIntent]);
 
   const handleMicPress = async () => {
     if (isGenerating) return;
@@ -234,8 +290,23 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
     });
   }, [isGenerating, isAnalyzingImage, isListening, stopListening, stop, speak, openCamera]);
 
-  const sendMessage = async (text: string) => {
+  const sendMessage = async (text: string, currentIntent: Intent = 'NON_VISION') => {
     if (isGenerating || !text.trim() || !context) return;
+
+    // Direct proactive responses for specific intents before even hitting the LLM if needed
+    if (currentIntent === 'VISION_OPTIONAL') {
+      const msg: Message = { id: Date.now().toString(), text: "I can look at that for you. Do you want me to open the camera?", sender: 'ai', timestamp: new Date() };
+      setMessages(prev => [...prev, { id: (Date.now() - 1).toString(), text, sender: 'user', timestamp: new Date() }, msg]);
+      speak(msg.text);
+      return;
+    }
+
+    if (currentIntent === 'UNCERTAIN') {
+      const msg: Message = { id: Date.now().toString(), text: "I'm not sure if you want me to look at something. Should I open the camera?", sender: 'ai', timestamp: new Date() };
+      setMessages(prev => [...prev, { id: (Date.now() - 1).toString(), text, sender: 'user', timestamp: new Date() }, msg]);
+      speak(msg.text);
+      return;
+    }
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -271,26 +342,54 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       const prompt = `System: You are Clara, a helpful AI assistant. ${locationContext}Respond concisely in ${langName}.
 User: ${userMsg.text}
 AI:`;
+        ? `User location: ${currentLoc.address}. `
+        : "";
 
       let fullResponse = '';
-      await context.completion(
-        {
-          prompt,
-          n_predict: 400,
-          stop: ['User:', 'System:'],
-        },
-        (res) => {
-          fullResponse += res.token;
-          setMessages((prev) => 
-            prev.map((msg) => 
-              msg.id === assistantMsgId ? { ...msg, text: fullResponse.trim() } : msg
-            )
-          );
+      let attempt = 1;
+      const maxAttempts = 2;
+
+      while (attempt <= maxAttempts) {
+        fullResponse = '';
+        const currentPrompt = attempt === 1 
+          ? `<start_of_turn>user\n${ASSISTIVE_VISION_PROTOCOL}\n\nContext: ${locationContext}\nUser message: ${userMsg.text}\nIMPORTANT: If the user is asking about something you cannot see, DO NOT say "I cannot see". Instead, suggest they say "look at this" to open the camera.\nFollow the OUTPUT CONTRACT strictly.<end_of_turn>\n<start_of_turn>model\n`
+          : `<start_of_turn>user\n${ASSISTIVE_VISION_PROTOCOL}\n\nContext: ${locationContext}\nUser message: ${userMsg.text}\nRETRY: Follow the FINAL SPEECH RULE: "<hazard> <location>. <action>."<end_of_turn>\n<start_of_turn>model\n`;
+
+        await context.completion(
+          {
+            prompt: currentPrompt,
+            n_predict: 150,
+            stop: ['<end_of_turn>', '<start_of_turn>'],
+            temperature: 0.2,
+            top_p: 0.8,
+          },
+          (res) => {
+            fullResponse += res.token;
+            const cleanText = fullResponse
+              .replace(/<\|channel>\w+/g, '')
+              .replace(/<channel\|>/g, '')
+              .trim();
+            
+            setMessages((prev) => 
+              prev.map((msg) => 
+                msg.id === assistantMsgId ? { ...msg, text: cleanText } : msg
+              )
+            );
+          }
+        );
+
+        const finalAnswer = fullResponse.trim();
+        // If it's a non-vision conversational reply, validation might fail but that's okay for general chat
+        if (isValidResponse(finalAnswer) || currentIntent === 'NON_VISION') {
+          break;
+        } else {
+          attempt++;
         }
-      );
+      }
       
-      if (fullResponse.trim()) {
-        speak(fullResponse.trim());
+      const finalClean = fullResponse.trim();
+      if (finalClean) {
+        speak(finalClean);
       }
     } catch (err) {
       console.error('Completion error:', err);
@@ -372,6 +471,8 @@ AI:`;
 
       let fullResponse = '';
       let tokenCount = 0;
+      let attempt = 1;
+      const maxAttempts = 2;
 
       const profile = await getUserProfile();
       const langName = getSafePromptLanguageName(profile?.language);
@@ -407,54 +508,90 @@ AI:`;
                 msg.id === assistantMsgId ? { ...msg, text: cleanText } : msg
               )
             );
+      while (attempt <= maxAttempts) {
+        fullResponse = '';
+        tokenCount = 0;
+        
+        const currentPrompt = attempt === 1 
+          ? `<start_of_turn>user\n<__media__>\n${ASSISTIVE_VISION_PROTOCOL}\n\nUser request: ${analysisPrompt}\nFollow the OUTPUT CONTRACT strictly.<end_of_turn>\n<start_of_turn>model\n`
+          : `<start_of_turn>user\n<__media__>\n${ASSISTIVE_VISION_PROTOCOL}\n\nUser request: ${analysisPrompt}\nRETRY: Follow the FINAL SPEECH RULE: "<hazard> <location>. <action>."<end_of_turn>\n<start_of_turn>model\n`;
+
+        console.log(`[Vision] Attempt ${attempt} starting...`);
+
+        const completionPromise = contextRef.current.completion(
+          {
+            prompt: currentPrompt,
+            n_predict: 100,
+            stop: ['<end_of_turn>', '<start_of_turn>'],
+            temperature: 0.2, // Lower temperature for more deterministic output
+            top_p: 0.8,
+            media_paths: [resizedPath],
+          } as any,
+          (res) => {
+            tokenCount++;
+            const tok = res.token || res.content || '';
+            fullResponse += tok;
+            
+            const cleanText = fullResponse
+              .replace(/<\|channel>\w+/g, '')
+              .replace(/<channel\|>/g, '')
+              .trim();
+            
+            if (cleanText) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMsgId ? { ...msg, text: cleanText } : msg
+                )
+              );
+            }
+          }
+        );
+
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Image analysis timed out')), 180000)
+        );
+
+        await Promise.race([completionPromise, timeoutPromise]);
+
+        const finalAnswer = fullResponse
+          .replace(/<\|channel>\w+/g, '')
+          .replace(/<channel\|>/g, '')
+          .trim();
+
+        if (isValidResponse(finalAnswer)) {
+          console.log(`[Vision] Valid response on attempt ${attempt}`);
+          break;
+        } else {
+          console.warn(`[Vision] Invalid response on attempt ${attempt}: ${finalAnswer}`);
+          attempt++;
+          if (attempt <= maxAttempts) {
+            speak('Refining description...');
+            await new Promise(resolve => setTimeout(resolve, 1000));
           }
         }
-      );
-
-      // 5 minute timeout — image processing alone takes ~90s on mobile CPU
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Image analysis timed out after 300s')), 300000)
-      );
-
-      await Promise.race([completionPromise, timeoutPromise]);
-
-      console.log('[Vision] Completion done. Tokens:', tokenCount, 'Time:', Date.now() - startTime, 'ms');
+      }
       
-      // Clean final response
-      const finalAnswer = fullResponse
+      const finalCleanAnswer = fullResponse
         .replace(/<\|channel>\w+/g, '')
         .replace(/<channel\|>/g, '')
         .trim();
-      
-      console.log('[Vision] Final answer:', finalAnswer.substring(0, 200));
 
-      if (finalAnswer) {
+      if (finalCleanAnswer) {
         setMessages((prev) =>
           prev.map((msg) =>
-            msg.id === assistantMsgId ? { ...msg, text: finalAnswer } : msg
+            msg.id === assistantMsgId ? { ...msg, text: finalCleanAnswer } : msg
           )
         );
-        // Speak the answer — wait for it to finish before clearing flags
-        // so the auto-listen cycle doesn't kill the speech
+        
         await stop();
         await new Promise<void>((resolve) => {
-          speak(finalAnswer);
-          // Estimate speech duration: ~80ms per word
-          const wordCount = finalAnswer.split(' ').length;
+          speak(finalCleanAnswer);
+          const wordCount = finalCleanAnswer.split(' ').length;
           const estimatedMs = Math.max(3000, wordCount * 400);
           setTimeout(resolve, estimatedMs);
         });
       } else {
-        console.warn('[Vision] Empty response from model');
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMsgId
-              ? { ...msg, text: 'The model could not generate a description. It may need more processing time on this device.' }
-              : msg
-          )
-        );
-        speak('I could not generate a description in time. The image processing is very heavy on this device.');
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        throw new Error('Empty response');
       }
     } catch (err) {
       console.error('[Home] Image analysis error:', err);
