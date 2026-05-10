@@ -22,7 +22,7 @@ import { useSTT } from '../hooks/useSTT';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { initLlama, LlamaContext } from 'llama.rn';
 import RNFS from 'react-native-fs';
-import { ASSISTIVE_VISION_PROTOCOL, INTENT_CLASSIFICATION_PROMPT, Intent } from '../constants/prompts';
+import { ASSISTIVE_VISION_PROTOCOL, GENERAL_ASSISTANT_PROTOCOL, INTENT_CLASSIFICATION_PROMPT, Intent } from '../constants/prompts';
 import { getCurrentLocation, LocationData } from '../services/location';
 import { isCameraCommand, extractCameraPrompt } from '../services/camera';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -112,6 +112,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
     const intent = result.trim().toUpperCase();
     if (intent.includes('VISION_REQUIRED')) return 'VISION_REQUIRED';
     if (intent.includes('VISION_OPTIONAL')) return 'VISION_OPTIONAL';
+    if (intent.includes('LANGUAGE_SWITCH')) return 'LANGUAGE_SWITCH';
     if (intent.includes('NON_VISION')) return 'NON_VISION';
     return 'UNCERTAIN';
   };
@@ -243,9 +244,39 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
           });
           return;
         }
-        
         // Handle "Yes" to VISION_OPTIONAL or UNCERTAIN follow-ups
         const lower = transcript.toLowerCase();
+        
+        if (intent === 'LANGUAGE_SWITCH') {
+          console.log('[Home] Language switch intent detected. Extracting language...');
+          let extractedLang = '';
+          const extractPrompt = `<start_of_turn>user\nExtract the target language from this text: "${transcript}". Reply ONLY with the standard English name of the language (e.g. "English", "Hindi", "Spanish"). If no language is found, reply "English".<end_of_turn>\n<start_of_turn>model\n`;
+          
+          if (context) {
+            await context.completion({
+              prompt: extractPrompt,
+              n_predict: 15,
+              stop: ['<end_of_turn>', '\n', '<eos>'],
+              temperature: 0.1,
+            }, (res) => {
+              extractedLang += res.token;
+            });
+          }
+
+          const cleanExtracted = extractedLang.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').trim();
+          const safeLang = getSafePromptLanguageName(cleanExtracted);
+          console.log(`[Home] Extracted language raw: ${cleanExtracted}, Safe: ${safeLang}`);
+          
+          const profile = await getUserProfile();
+          if (profile) {
+            await saveUserProfile({ ...profile, language: safeLang });
+            await refreshTTSLanguage(safeLang);
+            
+            // Send the original transcript to the AI, forcing it to use the newly saved profile language
+            sendMessage(transcript, 'NON_VISION');
+            return;
+          }
+        }
         if ((lower === 'yes' || lower === 'yeah' || lower === 'sure' || lower === 'do it') && 
             (lastIntent === 'VISION_OPTIONAL' || lastIntent === 'UNCERTAIN')) {
           speak('Opening camera.', () => {
@@ -338,12 +369,16 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
 
       const profile = await getUserProfile();
       const langName = getSafePromptLanguageName(profile?.language);
+      
+      const userContext = profile 
+        ? `User Profile - Height: ${profile.height || 'unknown'}, Vision Impairment: ${profile.visionImpairment || 'unknown'}, Guidance Preference: ${profile.guidanceType || 'unknown'}. `
+        : "";
+
+      const fullContext = `${locationContext}${userContext}`;
 
       const prompt = `System: You are Clara, a helpful AI assistant. ${locationContext}Respond concisely in ${langName}.
 User: ${userMsg.text}
 AI:`;
-        ? `User location: ${currentLoc.address}. `
-        : "";
 
       let fullResponse = '';
       let attempt = 1;
@@ -351,15 +386,18 @@ AI:`;
 
       while (attempt <= maxAttempts) {
         fullResponse = '';
+        const languageInstruction = `\nCRITICAL: You MUST respond in ${langName} using its native script and alphabet (e.g., use Devanagari letters for Hindi, Cyrillic for Russian). DO NOT use Roman/Latin letters for other languages (no Hinglish).`;
+        const activeProtocol = currentIntent === 'NON_VISION' ? GENERAL_ASSISTANT_PROTOCOL : ASSISTIVE_VISION_PROTOCOL;
+        
         const currentPrompt = attempt === 1 
-          ? `<start_of_turn>user\n${ASSISTIVE_VISION_PROTOCOL}\n\nContext: ${locationContext}\nUser message: ${userMsg.text}\nIMPORTANT: If the user is asking about something you cannot see, DO NOT say "I cannot see". Instead, suggest they say "look at this" to open the camera.\nFollow the OUTPUT CONTRACT strictly.<end_of_turn>\n<start_of_turn>model\n`
-          : `<start_of_turn>user\n${ASSISTIVE_VISION_PROTOCOL}\n\nContext: ${locationContext}\nUser message: ${userMsg.text}\nRETRY: Follow the FINAL SPEECH RULE: "<hazard> <location>. <action>."<end_of_turn>\n<start_of_turn>model\n`;
+          ? `<start_of_turn>user\n${activeProtocol}\n\nContext: ${fullContext}\nUser message: ${userMsg.text}\nIMPORTANT: If the user is asking about something you cannot see, DO NOT say "I cannot see". Instead, suggest they say "look at this" to open the camera.${languageInstruction}\nFollow the OUTPUT CONTRACT strictly.<end_of_turn>\n<start_of_turn>model\n`
+          : `<start_of_turn>user\n${activeProtocol}\n\nContext: ${fullContext}\nUser message: ${userMsg.text}\nRETRY: Follow the FINAL SPEECH RULE: "<hazard> <location>. <action>."${languageInstruction}<end_of_turn>\n<start_of_turn>model\n`;
 
         await context.completion(
           {
             prompt: currentPrompt,
             n_predict: 150,
-            stop: ['<end_of_turn>', '<start_of_turn>'],
+            stop: ['<end_of_turn>', '<start_of_turn>', '</start_of_turn>', '<eos>'],
             temperature: 0.2,
             top_p: 0.8,
           },
@@ -368,6 +406,7 @@ AI:`;
             const cleanText = fullResponse
               .replace(/<\|channel>\w+/g, '')
               .replace(/<channel\|>/g, '')
+              .replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '')
               .trim();
             
             setMessages((prev) => 
@@ -387,7 +426,11 @@ AI:`;
         }
       }
       
-      const finalClean = fullResponse.trim();
+      const finalClean = fullResponse
+        .replace(/<\|channel>\w+/g, '')
+        .replace(/<channel\|>/g, '')
+        .replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '')
+        .trim();
       if (finalClean) {
         speak(finalClean);
       }
@@ -477,44 +520,16 @@ AI:`;
       const profile = await getUserProfile();
       const langName = getSafePromptLanguageName(profile?.language);
 
-      const completionPromise = contextRef.current.completion(
-        {
-          // Use raw prompt with Gemma's NON-THINKING template format
-          // This bypasses the Jinja template that enables the thinking channel
-          prompt: `<start_of_turn>user\n<__media__>\nWhat is in this image? Answer in one sentence only in ${langName}.<end_of_turn>\n<start_of_turn>model\n`,
-          n_predict: 100, // Short answer only, no thinking = fewer tokens needed
-          stop: ['<end_of_turn>', '<start_of_turn>'],
-          temperature: 0.3,
-          media_paths: [resizedPath],
-        } as any,
-        (res) => {
-          tokenCount++;
-          if (tokenCount === 1) {
-            console.log('[Vision] First token received after', Date.now() - startTime, 'ms');
-          }
-          
-          const tok = res.token || res.content || '';
-          fullResponse += tok;
-          
-          // Direct display — no thinking tokens with this template
-          const cleanText = fullResponse
-            .replace(/<\|channel>\w+/g, '')
-            .replace(/<channel\|>/g, '')
-            .trim();
-          
-          if (cleanText) {
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === assistantMsgId ? { ...msg, text: cleanText } : msg
-              )
-            );
+
+      const languageInstruction = `\nCRITICAL: You MUST respond in ${langName} using its native script and alphabet (e.g., use Devanagari letters for Hindi). DO NOT use Roman/Latin letters for other languages (no Hinglish).`;
+
       while (attempt <= maxAttempts) {
         fullResponse = '';
         tokenCount = 0;
         
         const currentPrompt = attempt === 1 
-          ? `<start_of_turn>user\n<__media__>\n${ASSISTIVE_VISION_PROTOCOL}\n\nUser request: ${analysisPrompt}\nFollow the OUTPUT CONTRACT strictly.<end_of_turn>\n<start_of_turn>model\n`
-          : `<start_of_turn>user\n<__media__>\n${ASSISTIVE_VISION_PROTOCOL}\n\nUser request: ${analysisPrompt}\nRETRY: Follow the FINAL SPEECH RULE: "<hazard> <location>. <action>."<end_of_turn>\n<start_of_turn>model\n`;
+          ? `<start_of_turn>user\n<__media__>\n${ASSISTIVE_VISION_PROTOCOL}\n\nUser request: ${analysisPrompt}${languageInstruction}\nFollow the OUTPUT CONTRACT strictly.<end_of_turn>\n<start_of_turn>model\n`
+          : `<start_of_turn>user\n<__media__>\n${ASSISTIVE_VISION_PROTOCOL}\n\nUser request: ${analysisPrompt}\nRETRY: Follow the FINAL SPEECH RULE: "<hazard> <location>. <action>."${languageInstruction}<end_of_turn>\n<start_of_turn>model\n`;
 
         console.log(`[Vision] Attempt ${attempt} starting...`);
 
@@ -522,7 +537,7 @@ AI:`;
           {
             prompt: currentPrompt,
             n_predict: 100,
-            stop: ['<end_of_turn>', '<start_of_turn>'],
+            stop: ['<end_of_turn>', '<start_of_turn>', '</start_of_turn>', '<eos>'],
             temperature: 0.2, // Lower temperature for more deterministic output
             top_p: 0.8,
             media_paths: [resizedPath],
@@ -535,6 +550,7 @@ AI:`;
             const cleanText = fullResponse
               .replace(/<\|channel>\w+/g, '')
               .replace(/<channel\|>/g, '')
+              .replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '')
               .trim();
             
             if (cleanText) {
@@ -556,6 +572,7 @@ AI:`;
         const finalAnswer = fullResponse
           .replace(/<\|channel>\w+/g, '')
           .replace(/<channel\|>/g, '')
+          .replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '')
           .trim();
 
         if (isValidResponse(finalAnswer)) {
@@ -574,6 +591,7 @@ AI:`;
       const finalCleanAnswer = fullResponse
         .replace(/<\|channel>\w+/g, '')
         .replace(/<channel\|>/g, '')
+        .replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '')
         .trim();
 
       if (finalCleanAnswer) {

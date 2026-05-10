@@ -2,41 +2,41 @@
 
 Clara (VisionVoice) is an AI-powered assistant designed to support blind and visually impaired individuals through real-time audio guidance and vision-to-speech insights. The project leverages on-device LLMs to ensure 100% privacy and offline functionality.
 
-## Current Status: Intelligent Assistive Navigation System Active
+## Current Status: Intelligent Multi-Lingual Full Assistant
 
-Clara has evolved from a simple "describer" into a **proactive navigation guide**. The system now features a deterministic intent engine and a strict assistive output contract to provide safe, actionable guidance.
+Clara has evolved from a simple "describer" into a **proactive navigation guide** and **full conversational assistant**. The system now features a deterministic intent engine, a strict assistive output contract for navigation, and universal language switching capabilities.
 
 ### Core Features Implemented
 
-- **Intent + Capability Routing Layer** *(New)*:
-    - LLM-based classification of user queries into categories: `VISION_REQUIRED`, `VISION_OPTIONAL`, `NON_VISION`, and `UNCERTAIN`.
+- **Universal Multi-Lingual Voice Support** *(New)*:
+    - **Phonetic STT Handling**: Clara uses LLM-based intent extraction to seamlessly handle phonetic cross-language commands (e.g. saying "switch language to English" while in Hindi mode, which STT parses as "स्विच लैंग्वेज टू इंग्लिश").
+    - **Native Script Enforcement**: AI responses strictly use the native script of the selected language (e.g., Devanagari for Hindi, Cyrillic for Russian) instead of defaulting to Romanized text (Hinglish).
+    - **Auto-TTS Refresh**: Switching languages instantly updates the app's Text-to-Speech and STT configuration engines on-the-fly.
+
+- **Dual-Protocol Intent Routing Layer** *(New)*:
+    - LLM-based classification of user queries into categories: `VISION_REQUIRED`, `VISION_OPTIONAL`, `NON_VISION`, `LANGUAGE_SWITCH`, and `UNCERTAIN`.
+    - **Full Assistant Mode**: General queries like "Who is the PM of India?" are routed to the `GENERAL_ASSISTANT_PROTOCOL` and answered conversationally utilizing the user's database profile (incorporating their height, vision impairment level, etc.).
+    - **Assistive Vision Mode**: Queries asking for navigation/safety help invoke the strict `ASSISTIVE_VISION_PROTOCOL`.
     - **Smart Auto-Trigger**: Queries like "Is it safe to walk?" or "Anything ahead?" automatically trigger the camera without needing specific keywords.
-    - **Proactive Initiative**: Clara suggests opening the camera if she detects an ambiguous visual intent ("Should I open the camera?").
-- **Assistive Output Contract (Natural Navigation Speech)** *(New)*:
+
+- **Assistive Output Contract (Natural Navigation Speech)**:
     - **Action-First Guidance**: Every response is transformed into simple, spoken navigation instructions (e.g., "Car ahead. Stop.", "Path clear. Walk forward.").
     - **Zero Cognitive Overload**: Structured technical data (distances like "5m", labels like "center") are filtered out in favor of natural, high-signal speech.
-    - **Safety Prioritization**: Intelligent filtering prioritizes moving objects (cars, bikes) and immediate obstacles (within 2m) over irrelevant background objects.
-- **Self-Correcting Validation Loop** *(New)*:
+
+- **Self-Correcting Validation Loop & Cleanup**:
     - Automated output validator checks every AI response for compliance with the assistive protocol.
-    - **Smart Retry**: If a response is vague or structured incorrectly, Clara automatically re-prompts the model to refine the output before speaking.
+    - **Strict Tag Filtering**: Aggressive regex cleanup strips out any hallucinated XML tokens (`<start_of_turn>`, `<eos>`) ensuring the Text-to-Speech engine remains uninterrupted.
+
 - **Multimodal Vision Pipeline**:
     - Image resizing to 256×256 for fast local processing.
-    - Raw Gemma prompt template (non-thinking mode) for direct, low-latency generation.
-    - Thinking token extraction and filtering for clean output.
-- **On-Device LLM Integration**:
-    - Integration of **Gemma 4 E2B (Q4_K_M Quantized GGUF)** via `llama.rn`.
-    - Automated two-phase model download (main model + vision projector).
-- **Location & Environment Context**: 
-    - Real-time location ingestion for spatially-aware conversational responses.
-- **Responsive UI & Voice UX**: 
-    - Waveform animations, safe-area handling, and unified chat/vision interface.
+    - Integration of **Gemma 4 E2B (Q4_K_M Quantized GGUF)** via `llama.rn` and Vision Projector.
 
 ### The Assistive Intelligence Loop
 
-Clara doesn't just respond; she makes decisions based on the environment:
+Clara doesn't just respond; she makes decisions based on the environment and intent:
 
 ```
-Voice Input → Intent Engine → Action (Camera/Chat) → Perception → Output Validator → Natural Speech Guidance
+Voice Input → Intent Engine (General / Vision / Language Switch) → Action (Camera / Setting / Chat) → Natural Speech Guidance
 ```
 
 ### Voice Interaction Examples
@@ -45,9 +45,8 @@ Voice Input → Intent Engine → Action (Camera/Chat) → Perception → Output
 |------------|----------------|---------------|
 | "Is it safe to cross?" | **Auto-open Camera** | "Checking surroundings... Car ahead. Stop." |
 | "What is this?" | **Auto-open Camera** | "Looking now... Cup ahead. Path clear." |
-| "Check this" | **Clarify** | "Should I look at something with the camera?" |
-| "Yes" (after clarification) | **Follow-up Trigger** | "Opening camera... Low branch ahead. Duck." |
-| "Where am I?" | **Context Response** | "You are at 123 Main Street. Path clear." |
+| "स्विच लैंग्वेज टू इंग्लिश" | **Language Switch** | "I just switched your language to English." |
+| "Who is the PM of India?" | **General Chat** | "Narendra Modi is the current Prime Minister." |
 
 ### Tech Stack
 
@@ -55,7 +54,7 @@ Voice Input → Intent Engine → Action (Camera/Chat) → Perception → Output
 |----------|-----------|
 | **AI Engine** | `llama.rn` (Local GGUF execution) |
 | **Model** | Gemma 4 E2B Q4_K_M (~1.6GB) + Vision Projector (~986MB) |
-| **Logic Layer** | Intent-based Routing & Assistive Output Contract |
+| **Logic Layer** | Dual-Protocol Intent Routing & Universal Language Switcher |
 | **Framework** | React Native (Expo SDK 54) |
 | **Speech** | `expo-speech-recognition` (STT) & `expo-speech` (TTS) |
 
@@ -64,7 +63,8 @@ Voice Input → Intent Engine → Action (Camera/Chat) → Perception → Output
 ```
 src/
 ├── constants/
-│   └── prompts.ts          # Assistive Protocol & Intent Classifier prompts
+│   ├── prompts.ts          # Assistive Protocol, General Protocol & Intent Classifier
+│   └── languages.ts        # Universal language configuration
 ├── screens/
 │   ├── HomeScreen.tsx      # Main logic (Intent Engine, Validation Loop, UI)
 │   ├── CameraScreen.tsx    # Optimized vision capture
@@ -73,12 +73,6 @@ src/
 │   ├── camera.ts           # Dynamic prompt extraction logic
 │   └── ...
 ```
-
-## Roadmap: Next Steps
-
-1. **Environmental Depth Analysis**: Integrate basic spatial primitives (ground plane detection) for better floor-level obstacle detection.
-2. **Audio Haptics**: Use directional sound or vibration patterns to supplement speech for urgent warnings.
-3. **Local Memory (RAG)**: Persistent user preferences and safe-route history stored locally.
 
 ## Getting Started
 

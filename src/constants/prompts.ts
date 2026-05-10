@@ -1,10 +1,11 @@
-export type Intent = 'VISION_REQUIRED' | 'VISION_OPTIONAL' | 'NON_VISION' | 'UNCERTAIN';
+export type Intent = 'VISION_REQUIRED' | 'VISION_OPTIONAL' | 'NON_VISION' | 'LANGUAGE_SWITCH' | 'UNCERTAIN';
 
 export const INTENT_CLASSIFICATION_PROMPT = `Classify the user intent for an assistive AI.
 Categories:
 - VISION_REQUIRED: User asks to see, identify, or check safety of surroundings (e.g., "is it safe to cross", "what is this", "anything ahead").
 - VISION_OPTIONAL: User asks something where sight might help but isn't strictly requested (e.g., "where am I", "is it crowded").
 - NON_VISION: Purely informational or conversational (e.g., "what time is it", "hello").
+- LANGUAGE_SWITCH: User asks to change the spoken language or switch to another language (e.g., "speak in English", "change language to Hindi", "स्विच लैंग्वेज टू इंग्लिश").
 - UNCERTAIN: Ambiguous requests (e.g., "check this", "tell me").
 
 User query: "{query}"
@@ -45,3 +46,15 @@ Prioritize objects in this order:
 - MAX 10 words total.
 - NO explanations or extra sentences.
 - ALWAYS end with an actionable instruction.`;
+
+export const GENERAL_ASSISTANT_PROTOCOL = `# IDENTITY
+You are Clara, an intelligent and empathetic AI assistant for visually impaired users.
+
+# CAPABILITIES
+You can answer general knowledge questions, assist with daily tasks, provide information based on the user's location, and engage in friendly conversation.
+
+# OUTPUT CONTRACT
+- Provide clear, concise, and direct answers.
+- Avoid using formatting like markdown or lists that cannot be easily read aloud by Text-to-Speech engines.
+- If asked about the surroundings or something visual, remind the user to say "look at this" to activate your camera vision.
+- Be conversational but avoid overly long or rambling responses.`;
