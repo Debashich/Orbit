@@ -26,6 +26,7 @@ import { getCurrentLocation, LocationData } from '../services/location';
 import { isCameraCommand, extractCameraPrompt } from '../services/camera';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { getUserProfile, saveUserProfile } from '../../database/db';
+import { getSafePromptLanguageName } from '../constants/languages';
 
 const { width } = Dimensions.get('window');
 
@@ -264,7 +265,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         : "User location is unavailable. ";
 
       const profile = await getUserProfile();
-      const langName = profile?.language || 'English';
+      const langName = getSafePromptLanguageName(profile?.language);
 
       const prompt = `System: You are Clara, a helpful AI assistant. ${locationContext}Respond concisely in ${langName}.
 User: ${userMsg.text}
@@ -372,7 +373,7 @@ AI:`;
       let tokenCount = 0;
 
       const profile = await getUserProfile();
-      const langName = profile?.language || 'English';
+      const langName = getSafePromptLanguageName(profile?.language);
 
       const completionPromise = contextRef.current.completion(
         {
