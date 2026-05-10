@@ -10,7 +10,7 @@ import {
     Dimensions,
     Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as Icons from '@expo/vector-icons';
 import { saveUserProfile } from '../../database/db';
@@ -64,6 +64,8 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState(['', '', '', '']);
     const [isSaving, setIsSaving] = useState(false);
+    const insets = useSafeAreaInsets();
+    const bottomPadding = insets.bottom > 0 ? insets.bottom : 12;
 
     useEffect(() => {
         const init = async () => {
@@ -245,7 +247,7 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
                 </KeyboardAvoidingView>
 
                 {/* BOTTOM NAVIGATION */}
-                <View style={styles.footer}>
+                <View style={[styles.footer, { paddingBottom: bottomPadding }]}>
                     <TouchableOpacity
                         style={styles.navButton}
                         onPress={handleBack}
@@ -344,27 +346,27 @@ const styles = StyleSheet.create({
     },
     textWrap: {
         alignItems: 'center',
-        marginBottom: 50,
+        marginBottom: 30,
     },
     title: {
         color: '#fff',
-        fontSize: 28,
+        fontSize: 24,
         fontWeight: 'bold',
         textAlign: 'center',
     },
     subtitle: {
         color: '#aaa',
-        fontSize: 18,
+        fontSize: 16,
         textAlign: 'center',
-        marginTop: 15,
-        paddingHorizontal: 30,
-        lineHeight: 26,
+        marginTop: 12,
+        paddingHorizontal: 20,
+        lineHeight: 24,
     },
     inputCard: {
         width: '100%',
         backgroundColor: 'rgba(255, 255, 255, 0.03)',
-        borderRadius: 35,
-        paddingVertical: 60,
+        borderRadius: 28,
+        paddingVertical: 40,
         paddingHorizontal: 20,
         alignItems: 'center',
         borderWidth: 1,
@@ -372,7 +374,7 @@ const styles = StyleSheet.create({
     },
     input: {
         color: '#fff',
-        fontSize: 34,
+        fontSize: 28,
         textAlign: 'center',
         width: '100%',
         fontWeight: '600',
@@ -399,19 +401,19 @@ const styles = StyleSheet.create({
         letterSpacing: 2,
     },
     micButtonContainer: {
-        marginTop: 60,
+        marginTop: 30,
     },
     micButton: {
-        width: 90,
-        height: 90,
-        borderRadius: 45,
+        width: 80,
+        height: 80,
+        borderRadius: 40,
         justifyContent: 'center',
         alignItems: 'center',
     },
     footer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        paddingBottom: 40,
+        paddingBottom: 20,
         marginTop: 'auto',
     },
     navButton: {

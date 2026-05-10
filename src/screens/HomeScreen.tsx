@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Icons from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTTS } from '../hooks/useTTS';
@@ -19,6 +19,7 @@ import { initLlama, LlamaContext } from 'llama.rn';
 import RNFS from 'react-native-fs';
 import { getCurrentLocation, LocationData } from '../services/location';
 import { isCameraCommand, extractCameraPrompt } from '../services/camera';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
 const { width } = Dimensions.get('window');
 
@@ -54,12 +55,16 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   const [isInitializing, setIsInitializing] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
+  // If insets.bottom is 0 (button navigation), add padding; if > 0 (gesture nav), use insets
+  const bottomPadding = insets.bottom > 0 ? insets.bottom : 12;
 
   const [context, setContext] = useState<LlamaContext | null>(null);
   const contextRef = useRef<LlamaContext | null>(null);
   const [location, setLocation] = useState<LocationData | null>(null);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const pendingImageRef = useRef<{ uri: string; prompt: string; command: string } | null>(null);
+  const lastProcessedTranscript = useRef<string>('');
 
   // Sync ref with state
   useEffect(() => {
@@ -85,18 +90,33 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         const llamaConfig: any = {
           model: modelPath,
           use_mlock: false,
-          n_ctx: 512,
+          n_ctx: 2048, // MUST be large enough to hold image tokens (256-512) + prompt + response
+          n_gpu_layers: 99, // Attempt GPU offloading — Mali-G57 MC2 supports OpenCL 2.0
         };
 
+        const llamaContext = await initLlama(llamaConfig);
+        
         // Add multimodal projector for vision support if available
         if (mmprojExists) {
-          llamaConfig.mmproj = mmprojPath;
-          console.log('[Home] mmproj found, vision mode enabled');
+          try {
+            const mmResult = await llamaContext.initMultimodal({ 
+              path: mmprojPath,
+              image_max_tokens: 256, // 256 is the minimum that works with this projector
+            });
+            console.log('[Home] initMultimodal returned:', mmResult);
+            const mmEnabled = await llamaContext.isMultimodalEnabled();
+            console.log('[Home] isMultimodalEnabled:', mmEnabled);
+            if (mmEnabled) {
+              console.log('[Home] ✅ Vision mode confirmed active');
+            } else {
+              console.error('[Home] ❌ Vision mode failed to activate despite no error');
+            }
+          } catch (err) {
+            console.error('[Home] Failed to load mmproj:', err);
+          }
         } else {
           console.log('[Home] mmproj not found, text-only mode');
         }
-
-        const llamaContext = await initLlama(llamaConfig);
         
         setContext(llamaContext);
         setIsInitializing(false);
@@ -140,32 +160,25 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       navigation.navigate('Camera', {
         command,
         analysisPrompt,
+        onCapture: (uri: string, cmd: string, prompt: string) => {
+          // Process the captured image directly
+          analyzeImage(uri, prompt, cmd);
+        }
       });
     },
     [navigation]
   );
 
-  // Handle captured image returned from CameraScreen
-  useEffect(() => {
-    const params = route.params;
-    if (params?.capturedImageUri && contextRef.current && !isAnalyzingImage) {
-      const imageUri = params.capturedImageUri;
-      const analysisPrompt = params.analysisPrompt || 'Describe what you see in this image.';
-      const cameraCommand = params.cameraCommand || 'capture image';
-      
-      // Clear the params to prevent re-processing
-      navigation.setParams({ capturedImageUri: undefined, analysisPrompt: undefined, cameraCommand: undefined });
-      
-      // Process the captured image
-      analyzeImage(imageUri, analysisPrompt, cameraCommand);
-    }
-  }, [route.params?.capturedImageUri, isAnalyzingImage]);
+  // Note: We no longer rely on useEffect and route.params to trigger analyzeImage.
+  // It is now handled safely via the onCapture callback to prevent screen remounting bugs.
 
   // Handle automatic sending when transcript is captured
   useEffect(() => {
-    if (transcript && !isListening && !isGenerating && !isAnalyzingImage) {
+    if (transcript && transcript !== lastProcessedTranscript.current && !isListening && !isGenerating && !isAnalyzingImage) {
       console.log('--- Triggering Send Message ---');
       console.log('Final Transcript:', transcript);
+      
+      lastProcessedTranscript.current = transcript;
       
       // Check if this is a camera command
       if (isCameraCommand(transcript)) {
@@ -306,31 +319,125 @@ AI:`;
     try {
       speak('Analyzing the image now...');
 
-      const prompt = `System: You are Clara, a helpful AI assistant with vision capabilities. Analyze the provided image carefully and respond to the user's request.
-User: ${analysisPrompt}
-AI:`;
+      // Verify multimodal is still active (it can get lost after navigation)
+      const mmCheck = await contextRef.current.isMultimodalEnabled();
+      console.log('[Vision] Multimodal enabled check:', mmCheck);
+      
+      if (!mmCheck) {
+        console.log('[Vision] Multimodal not active, attempting re-init...');
+        const mmprojPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-mmproj.gguf`;
+        const reInit = await contextRef.current.initMultimodal({
+          path: mmprojPath,
+          image_max_tokens: 256,
+        });
+        console.log('[Vision] Re-init result:', reInit);
+        const reCheck = await contextRef.current.isMultimodalEnabled();
+        if (!reCheck) {
+          throw new Error('Failed to re-enable multimodal after re-init');
+        }
+        console.log('[Vision] ✅ Multimodal re-enabled successfully');
+      }
+
+      const cleanPath = imageUri.replace('file://', '');
+      console.log('[Vision] Original image path:', cleanPath);
+      
+      // Resize image to 256x256 to dramatically speed up projector processing
+      console.log('[Vision] Resizing image to 256x256...');
+      const resizeStart = Date.now();
+      const resized = await manipulateAsync(
+        imageUri,
+        [{ resize: { width: 256, height: 256 } }],
+        { compress: 0.5, format: SaveFormat.JPEG }
+      );
+      const resizedPath = resized.uri.replace('file://', '');
+      console.log('[Vision] Resized in', Date.now() - resizeStart, 'ms →', resized.width, 'x', resized.height);
+      console.log('[Vision] Resized image path:', resizedPath);
+      
+      console.log('[Vision] Starting completion...');
+      const startTime = Date.now();
 
       let fullResponse = '';
-      await contextRef.current.completion(
+      let tokenCount = 0;
+
+      const completionPromise = contextRef.current.completion(
         {
-          prompt,
-          n_predict: 500,
-          stop: ['User:', 'System:'],
-          media_paths: [imageUri],
+          // Use raw prompt with Gemma's NON-THINKING template format
+          // This bypasses the Jinja template that enables the thinking channel
+          prompt: `<start_of_turn>user\n<__media__>\nWhat is in this image? Answer in one sentence only.<end_of_turn>\n<start_of_turn>model\n`,
+          n_predict: 100, // Short answer only, no thinking = fewer tokens needed
+          stop: ['<end_of_turn>', '<start_of_turn>'],
+          temperature: 0.3,
+          media_paths: [resizedPath],
         } as any,
         (res) => {
-          fullResponse += res.token;
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === assistantMsgId ? { ...msg, text: fullResponse.trim() } : msg
-            )
-          );
+          tokenCount++;
+          if (tokenCount === 1) {
+            console.log('[Vision] First token received after', Date.now() - startTime, 'ms');
+          }
+          
+          const tok = res.token || res.content || '';
+          fullResponse += tok;
+          
+          // Direct display — no thinking tokens with this template
+          const cleanText = fullResponse
+            .replace(/<\|channel>\w+/g, '')
+            .replace(/<channel\|>/g, '')
+            .trim();
+          
+          if (cleanText) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMsgId ? { ...msg, text: cleanText } : msg
+              )
+            );
+          }
         }
       );
 
-      if (fullResponse.trim()) {
+      // 5 minute timeout — image processing alone takes ~90s on mobile CPU
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Image analysis timed out after 300s')), 300000)
+      );
+
+      await Promise.race([completionPromise, timeoutPromise]);
+
+      console.log('[Vision] Completion done. Tokens:', tokenCount, 'Time:', Date.now() - startTime, 'ms');
+      
+      // Clean final response
+      const finalAnswer = fullResponse
+        .replace(/<\|channel>\w+/g, '')
+        .replace(/<channel\|>/g, '')
+        .trim();
+      
+      console.log('[Vision] Final answer:', finalAnswer.substring(0, 200));
+
+      if (finalAnswer) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMsgId ? { ...msg, text: finalAnswer } : msg
+          )
+        );
+        // Speak the answer — wait for it to finish before clearing flags
+        // so the auto-listen cycle doesn't kill the speech
         await stop();
-        speak(fullResponse.trim());
+        await new Promise<void>((resolve) => {
+          speak(finalAnswer);
+          // Estimate speech duration: ~80ms per word
+          const wordCount = finalAnswer.split(' ').length;
+          const estimatedMs = Math.max(3000, wordCount * 400);
+          setTimeout(resolve, estimatedMs);
+        });
+      } else {
+        console.warn('[Vision] Empty response from model');
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMsgId
+              ? { ...msg, text: 'The model could not generate a description. It may need more processing time on this device.' }
+              : msg
+          )
+        );
+        speak('I could not generate a description in time. The image processing is very heavy on this device.');
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
     } catch (err) {
       console.error('[Home] Image analysis error:', err);
@@ -342,6 +449,7 @@ AI:`;
         )
       );
       speak('Sorry, I could not analyze the image. Please try again.');
+      await new Promise(resolve => setTimeout(resolve, 4000));
     } finally {
       setIsGenerating(false);
       setIsAnalyzingImage(false);
@@ -434,12 +542,12 @@ AI:`;
           })}
 
           {/* Add bottom padding to allow scrolling past the fixed UI */}
-          <View style={{ height: 200 }} />
+          <View style={{ height: 280 }} />
         </ScrollView>
       </SafeAreaView>
 
       {/* LISTENING UI & BOTTOM BAR (Overlay) */}
-      <View style={styles.fixedBottomContainer}>
+      <View style={[styles.fixedBottomContainer, { paddingBottom: bottomPadding }]}>
         {/* WAVEFORM */}
         <View style={styles.listeningContainer}>
           <View style={styles.waveform}>
@@ -447,7 +555,7 @@ AI:`;
               <LinearGradient
                 key={i}
                 colors={['#c084fc', '#db2777']}
-                style={[styles.waveBar, { height: (isGenerating || isListening) ? h * (Math.random() * 0.5 + 0.5) : 5 }]}
+                style={[styles.waveBar, { height: (isGenerating || isListening) ? h * 0.85 * (Math.random() * 0.5 + 0.5) : 5 }]}
               />
             ))}
           </View>
@@ -462,7 +570,7 @@ AI:`;
             style={styles.tabIcon} 
             onPress={() => navigation.navigate('Chat')}
           >
-            <SafeIcon set="MaterialCommunityIcons" name="history" size={28} color="#94a3b8" />
+            <SafeIcon set="MaterialCommunityIcons" name="history" size={26} color="#94a3b8" />
           </TouchableOpacity>
 
           {/* GLOWING MIC BUTTON */}
@@ -476,17 +584,13 @@ AI:`;
                 colors={isListening ? ['#ef4444', '#b91c1c'] : ['#a855f7', '#db2777']}
                 style={[styles.tabMicButton, isGenerating && { opacity: 0.5 }]}
               >
-                <SafeIcon set="Ionicons" name={isListening ? "stop" : "mic"} size={32} color="white" />
+                <SafeIcon set="Ionicons" name={isListening ? "stop" : "mic"} size={30} color="white" />
               </LinearGradient>
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.tabIcon} onPress={handleManualCameraPress}>
-            <SafeIcon set="Ionicons" name="camera-outline" size={26} color="#94a3b8" />
-          </TouchableOpacity>
-
           <TouchableOpacity style={styles.tabIcon}>
-            <SafeIcon set="Ionicons" name="settings-sharp" size={26} color="#94a3b8" />
+            <SafeIcon set="Ionicons" name="settings-sharp" size={24} color="#94a3b8" />
           </TouchableOpacity>
         </View>
       </View>
@@ -608,18 +712,18 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: '#0f111a',
-    paddingTop: 10,
+    paddingTop: 8,
   },
   listeningContainer: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 14,
   },
   waveform: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 70,
-    gap: 6,
-    marginBottom: 15,
+    height: 60,
+    gap: 5,
+    marginBottom: 10,
   },
   waveBar: {
     width: 5,
@@ -627,7 +731,7 @@ const styles = StyleSheet.create({
   },
   listeningText: {
     color: '#94a3b8',
-    fontSize: 12,
+    fontSize: 11,
     letterSpacing: 2,
     fontWeight: '600',
     paddingHorizontal: 40,
@@ -636,13 +740,12 @@ const styles = StyleSheet.create({
   bottomTabBar: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    alignItems: 'flex-end',
-    paddingBottom: 40,
+    alignItems: 'center',
+    paddingBottom: 10,
     paddingHorizontal: 20,
   },
   tabIcon: {
     padding: 10,
-    marginBottom: 10,
   },
   tabMicWrapper: {
     position: 'relative',
@@ -651,22 +754,22 @@ const styles = StyleSheet.create({
   },
   micGlow: {
     position: 'absolute',
-    width: 110,
-    height: 110,
-    borderRadius: 55,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     backgroundColor: '#db2777',
     opacity: 0.15,
   },
   tabMicButton: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#db2777',
-    shadowOffset: { width: 0, height: 10 },
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 15,
+    shadowRadius: 16,
+    elevation: 12,
   },
 });

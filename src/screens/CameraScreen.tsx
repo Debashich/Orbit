@@ -11,6 +11,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Icons from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
 
@@ -38,6 +39,9 @@ export default function CameraScreen() {
   const [hasAutoCaptured, setHasAutoCaptured] = useState(false);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
   const handleCaptureRef = useRef<() => void>(() => {});
+  const insets = useSafeAreaInsets();
+  const topPadding = insets.top > 0 ? insets.top : 24;
+  const bottomPadding = insets.bottom > 0 ? insets.bottom + 10 : 24;
 
   const command = route.params?.command || 'Capture image';
   const analysisPrompt = route.params?.analysisPrompt || 'Describe what you see in this image.';
@@ -72,18 +76,18 @@ export default function CameraScreen() {
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
+        quality: 0.1, // Drastically lower quality to reduce file size and speed up processing
         base64: false,
-        skipProcessing: false,
+        skipProcessing: true, // Crucial for preventing crashes on Android Emulators and some devices
       });
 
       if (photo?.uri) {
-        // Navigate back to Home with the captured image
-        navigation.navigate('Home', {
-          capturedImageUri: photo.uri,
-          analysisPrompt: analysisPrompt,
-          cameraCommand: command,
-        });
+        // Trigger the callback from HomeScreen to pass the image back safely
+        if (route.params?.onCapture) {
+          route.params.onCapture(photo.uri, command, analysisPrompt);
+        }
+        // Safely pop the CameraScreen without touching HomeScreen's route state
+        navigation.goBack();
       } else {
         setIsCapturing(false);
         setHasAutoCaptured(false);
@@ -148,76 +152,78 @@ export default function CameraScreen() {
     );
   }
 
-  // Capturing state overlay
-  if (isCapturing) {
-    return (
-      <View style={[styles.container, styles.center]}>
-        <ActivityIndicator size="large" color="#d946ef" />
-        <Text style={styles.capturingText}>CAPTURING...</Text>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
       <CameraView
         ref={cameraRef}
         style={styles.camera}
         facing={facing}
-      >
-        {/* Top overlay with command text */}
-        <View style={styles.topOverlay}>
-          <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-            <SafeIcon set="Ionicons" name="close" size={28} color="white" />
-          </TouchableOpacity>
-          <View style={styles.commandBadge}>
-            <SafeIcon set="Ionicons" name="mic" size={14} color="#d946ef" />
-            <Text style={styles.commandText} numberOfLines={2}>
-              "{command}"
-            </Text>
+      />
+      
+      {/* Overlays rendered as siblings instead of children for expo-camera v14+ */}
+      <View style={styles.overlayContainer}>
+        {isCapturing ? (
+          <View style={[styles.overlayContainer, styles.center, { backgroundColor: 'rgba(15, 17, 26, 0.8)' }]}>
+            <ActivityIndicator size="large" color="#d946ef" />
+            <Text style={styles.capturingText}>CAPTURING...</Text>
           </View>
-          <TouchableOpacity onPress={toggleFacing} style={styles.flipButton}>
-            <SafeIcon set="Ionicons" name="camera-reverse-outline" size={24} color="white" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Center crosshair / focus indicator */}
-        <View style={styles.centerOverlay}>
-          <View style={styles.crosshair}>
-            <View style={[styles.cornerBracket, styles.topLeft]} />
-            <View style={[styles.cornerBracket, styles.topRight]} />
-            <View style={[styles.cornerBracket, styles.bottomLeft]} />
-            <View style={[styles.cornerBracket, styles.bottomRight]} />
-          </View>
-        </View>
-
-        {/* Bottom overlay with countdown and capture button */}
-        <View style={styles.bottomOverlay}>
-          {/* Countdown display */}
-          <View style={styles.countdownContainer}>
-            <Text style={styles.countdownLabel}>AUTO-CAPTURE IN</Text>
-            <View style={styles.countdownCircle}>
-              <Text style={styles.countdownNumber}>{countdown}</Text>
+        ) : (
+          <>
+            {/* Top overlay with command text */}
+            <View style={[styles.topOverlay, { paddingTop: topPadding + 10 }]}>
+              <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+                <SafeIcon set="Ionicons" name="close" size={28} color="white" />
+              </TouchableOpacity>
+              <View style={styles.commandBadge}>
+                <SafeIcon set="Ionicons" name="mic" size={14} color="#d946ef" />
+                <Text style={styles.commandText} numberOfLines={2}>
+                  "{command}"
+                </Text>
+              </View>
+              <TouchableOpacity onPress={toggleFacing} style={styles.flipButton}>
+                <SafeIcon set="Ionicons" name="camera-reverse-outline" size={24} color="white" />
+              </TouchableOpacity>
             </View>
-          </View>
 
-          {/* Manual capture button */}
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={handleCapture}
-            style={styles.captureButtonOuter}
-          >
-            <LinearGradient
-              colors={['#d946ef', '#9333ea']}
-              style={styles.captureButtonInner}
-            >
-              <SafeIcon set="Ionicons" name="camera" size={32} color="white" />
-            </LinearGradient>
-          </TouchableOpacity>
+            {/* Center crosshair / focus indicator */}
+            <View style={styles.centerOverlay}>
+              <View style={styles.crosshair}>
+                <View style={[styles.cornerBracket, styles.topLeft]} />
+                <View style={[styles.cornerBracket, styles.topRight]} />
+                <View style={[styles.cornerBracket, styles.bottomLeft]} />
+                <View style={[styles.cornerBracket, styles.bottomRight]} />
+              </View>
+            </View>
 
-          <Text style={styles.captureHint}>or tap to capture now</Text>
-        </View>
-      </CameraView>
+            {/* Bottom overlay with countdown and capture button */}
+            <View style={[styles.bottomOverlay, { paddingBottom: bottomPadding }]}>
+              {/* Countdown display */}
+              <View style={styles.countdownContainer}>
+                <Text style={styles.countdownLabel}>AUTO-CAPTURE IN</Text>
+                <View style={styles.countdownCircle}>
+                  <Text style={styles.countdownNumber}>{countdown}</Text>
+                </View>
+              </View>
+
+              {/* Manual capture button */}
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={handleCapture}
+                style={styles.captureButtonOuter}
+              >
+                <LinearGradient
+                  colors={['#d946ef', '#9333ea']}
+                  style={styles.captureButtonInner}
+                >
+                  <SafeIcon set="Ionicons" name="camera" size={32} color="white" />
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <Text style={styles.captureHint}>or tap to capture now</Text>
+            </View>
+          </>
+        )}
+      </View>
     </View>
   );
 }
@@ -232,7 +238,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   camera: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  overlayContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 
   // Top overlay
@@ -328,7 +345,7 @@ const styles = StyleSheet.create({
   // Bottom overlay
   bottomOverlay: {
     alignItems: 'center',
-    paddingBottom: 50,
+    paddingBottom: 30,
     paddingTop: 20,
     backgroundColor: 'rgba(15, 17, 26, 0.7)',
   },

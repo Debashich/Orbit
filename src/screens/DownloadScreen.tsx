@@ -9,7 +9,7 @@ import {
   Image,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as Icons from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -36,6 +36,8 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
   const [downloadedMB, setDownloadedMB] = useState(0);
   const [totalMB, setTotalMB] = useState(1600); // Updated to ~1.6GB for Gemma 4 E2B Q4_K_M
   const [downloadPhase, setDownloadPhase] = useState<'model' | 'mmproj'>('model');
+  const insets = useSafeAreaInsets();
+  const bottomPadding = insets.bottom > 0 ? insets.bottom : 12;
 
   useEffect(() => {
     // Check if already downloaded (both model and mmproj)
@@ -311,7 +313,7 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
       </SafeAreaView>
 
       {/* BOTTOM TAB BAR (Overlay) */}
-      <View style={styles.bottomTabBar}>
+      <View style={[styles.bottomTabBar, { paddingBottom: bottomPadding + 10 }]}>
         <TouchableOpacity 
           style={styles.tabIcon}
           onPress={() => navigation.navigate('Chat')}
@@ -521,12 +523,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 90,
+    height: 80,
     backgroundColor: '#0f111a',
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingBottom: 20,
+    paddingBottom: 10,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.03)',
   },
