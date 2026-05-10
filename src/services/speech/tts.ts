@@ -6,20 +6,38 @@ import { getLanguageCode } from '../../constants/languages';
 
 let isSpeaking = false;
 let isInitialized = false;
-let cachedLanguageCode = 'en-US';
+let cachedLanguageCode = '';
 let hasCachedLanguage = false;
+let languageRefreshPromise: Promise<string> | null = null;
 
-export const refreshTTSLanguage = async (languageName?: string) => {
+export const refreshTTSLanguage = async (languageName?: string, forceRefresh = false) => {
   if (typeof languageName === 'string' && languageName.trim().length > 0) {
     cachedLanguageCode = getLanguageCode(languageName);
     hasCachedLanguage = true;
+    languageRefreshPromise = null;
     return cachedLanguageCode;
   }
 
-  const profile = await getUserProfile();
-  cachedLanguageCode = getLanguageCode(profile?.language);
-  hasCachedLanguage = true;
-  return cachedLanguageCode;
+  if (!forceRefresh && hasCachedLanguage && cachedLanguageCode) {
+    return cachedLanguageCode;
+  }
+
+  if (languageRefreshPromise) {
+    return languageRefreshPromise;
+  }
+
+  languageRefreshPromise = (async () => {
+    const profile = await getUserProfile();
+    cachedLanguageCode = getLanguageCode(profile?.language);
+    hasCachedLanguage = true;
+    return cachedLanguageCode;
+  })();
+
+  try {
+    return await languageRefreshPromise;
+  } finally {
+    languageRefreshPromise = null;
+  }
 };
 
 export const initializeTTS = async () => {
@@ -57,10 +75,8 @@ export const speakText = async (text: string, onDone?: () => void) => {
     return;
   }
 
-  if (!hasCachedLanguage) {
-    await refreshTTSLanguage();
-  }
-  const langCode = cachedLanguageCode;
+  await refreshTTSLanguage();
+  const langCode = cachedLanguageCode || 'en-US';
 
   stopSpeech();
   isSpeaking = true;
