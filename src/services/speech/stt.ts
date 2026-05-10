@@ -1,5 +1,7 @@
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { PermissionsAndroid, Platform } from "react-native";
+import { getUserProfile } from "../../../database/db";
+import { getLanguageCode } from "../../constants/languages";
 
 let activeListeners: Array<{ remove: () => void }> = [];
 let isListeningNow = false;
@@ -94,9 +96,12 @@ export const startVoice = async (onResult: (text: string) => void, onEnd: () => 
     activeListeners = [resultListener, errorListener, endListener];
     console.log('[STT] ✅ Listeners registered');
 
-    console.log('[STT] 🚀 Calling module.start()');
+    const profile = await getUserProfile();
+    const langCode = getLanguageCode(profile?.language);
+
+    console.log(`[STT] 🚀 Calling module.start() with lang: ${langCode}`);
     ExpoSpeechRecognitionModule.start({
-      lang: 'en-IN',
+      lang: langCode,
       interimResults: true,
     });
     console.log('[STT] ✅ start() called successfully');

@@ -1,6 +1,8 @@
 import * as Speech from 'expo-speech';
 import { Vibration } from 'react-native';
 import { VOICE_CONFIG } from '../../constants/voice';
+import { getUserProfile } from '../../../database/db';
+import { getLanguageCode } from '../../constants/languages';
 
 let isSpeaking = false;
 let isInitialized = false;
@@ -32,18 +34,22 @@ export const stopSpeech = () => {
   }
 };
 
-export const speakText = (text: string, onDone?: () => void) => {
+export const speakText = async (text: string, onDone?: () => void) => {
   if (!text || text.trim().length === 0) {
     console.log('[TTS] ⚠️ Empty text, skipping');
     onDone?.();
     return;
   }
 
+  const profile = await getUserProfile();
+  const langCode = getLanguageCode(profile?.language);
+
   stopSpeech();
   isSpeaking = true;
 
   const speakOptions: any = {
     ...VOICE_CONFIG,
+    language: langCode,
     onDone: () => {
       isSpeaking = false;
       console.log('[TTS] ✅ Speech completed');

@@ -8,6 +8,11 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Icons from '@expo/vector-icons';
@@ -20,6 +25,7 @@ import RNFS from 'react-native-fs';
 import { getCurrentLocation, LocationData } from '../services/location';
 import { isCameraCommand, extractCameraPrompt } from '../services/camera';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { getUserProfile, saveUserProfile } from '../../database/db';
 
 const { width } = Dimensions.get('window');
 
@@ -65,6 +71,9 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const pendingImageRef = useRef<{ uri: string; prompt: string; command: string } | null>(null);
   const lastProcessedTranscript = useRef<string>('');
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsLanguage, setSettingsLanguage] = useState('');
 
   // Sync ref with state
   useEffect(() => {
@@ -254,7 +263,10 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         ? `User is currently at ${currentLoc.address} (Lat: ${currentLoc.latitude}, Lon: ${currentLoc.longitude}). `
         : "User location is unavailable. ";
 
-      const prompt = `System: You are Clara, a helpful AI assistant. ${locationContext}Respond concisely.
+      const profile = await getUserProfile();
+      const langName = profile?.language || 'English';
+
+      const prompt = `System: You are Clara, a helpful AI assistant. ${locationContext}Respond concisely in ${langName}.
 User: ${userMsg.text}
 AI:`;
 
@@ -359,11 +371,14 @@ AI:`;
       let fullResponse = '';
       let tokenCount = 0;
 
+      const profile = await getUserProfile();
+      const langName = profile?.language || 'English';
+
       const completionPromise = contextRef.current.completion(
         {
           // Use raw prompt with Gemma's NON-THINKING template format
           // This bypasses the Jinja template that enables the thinking channel
-          prompt: `<start_of_turn>user\n<__media__>\nWhat is in this image? Answer in one sentence only.<end_of_turn>\n<start_of_turn>model\n`,
+          prompt: `<start_of_turn>user\n<__media__>\nWhat is in this image? Answer in one sentence only in ${langName}.<end_of_turn>\n<start_of_turn>model\n`,
           n_predict: 100, // Short answer only, no thinking = fewer tokens needed
           stop: ['<end_of_turn>', '<start_of_turn>'],
           temperature: 0.3,
@@ -589,11 +604,50 @@ AI:`;
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.tabIcon}>
+          <TouchableOpacity style={styles.tabIcon} onPress={async () => {
+            const profile = await getUserProfile();
+            setSettingsLanguage(profile?.language || 'English');
+            setIsSettingsOpen(true);
+          }}>
             <SafeIcon set="Ionicons" name="settings-sharp" size={24} color="#94a3b8" />
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* SETTINGS MODAL */}
+      <Modal visible={isSettingsOpen} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Settings</Text>
+            <Text style={styles.modalSubtitle}>Preferred Language:</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="e.g. English, Spanish, Hindi"
+              placeholderTextColor="#94a3b8"
+              value={settingsLanguage}
+              onChangeText={setSettingsLanguage}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalButton} onPress={() => setIsSettingsOpen(false)}>
+                <Text style={styles.modalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.modalButtonPrimary]} 
+                onPress={async () => {
+                  const profile = await getUserProfile();
+                  if (profile) {
+                    await saveUserProfile({ ...profile, language: settingsLanguage || 'English' });
+                    Alert.alert('Success', 'Language updated!');
+                  }
+                  setIsSettingsOpen(false);
+                }}
+              >
+                <Text style={styles.modalButtonTextPrimary}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -771,5 +825,64 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 16,
     elevation: 12,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '100%',
+    backgroundColor: '#1c1e2d',
+    borderRadius: 16,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 16,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#94a3b8',
+    marginBottom: 8,
+  },
+  modalInput: {
+    backgroundColor: '#0f111a',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 8,
+    padding: 12,
+    color: '#fff',
+    fontSize: 16,
+    marginBottom: 24,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  modalButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  modalButtonPrimary: {
+    backgroundColor: '#d946ef',
+  },
+  modalButtonText: {
+    color: '#94a3b8',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  modalButtonTextPrimary: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });

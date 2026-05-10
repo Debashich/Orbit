@@ -52,9 +52,14 @@ const QUESTIONS = [
         subtitle: "Choose between detailed or concise audio descriptions.",
         placeholder: "e.g. Detailed",
     },
+    {
+        title: "What is your preferred language?",
+        subtitle: "Select the language you want to speak and hear.",
+        placeholder: "e.g. English, Spanish, Hindi",
+    },
 ];
 
-const TOTAL_STEPS = QUESTIONS.length; // 4
+const TOTAL_STEPS = QUESTIONS.length; // 5
 
 export default function OnboardingScreen({ navigation: propNavigation }: any) {
     const hookNavigation = useNavigation<any>();
@@ -62,7 +67,7 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
     const { speak, stop } = useTTS();
     const { transcript, isListening, startListening, stopListening } = useSTT();
     const [currentStep, setCurrentStep] = useState(0);
-    const [answers, setAnswers] = useState(['', '', '', '']);
+    const [answers, setAnswers] = useState(['', '', '', '', '']);
     const [isSaving, setIsSaving] = useState(false);
     const insets = useSafeAreaInsets();
     const bottomPadding = insets.bottom > 0 ? insets.bottom : 12;
@@ -135,6 +140,7 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
                     weight: answers[1],
                     visionImpairment: answers[2],
                     guidanceType: answers[3],
+                    language: answers[4] || 'English',
                 });
 
                 if (success) {

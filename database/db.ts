@@ -13,6 +13,7 @@ export interface UserProfile {
     weight: string;
     visionImpairment: string;
     guidanceType: string;
+    language?: string;
 }
 
 const USER_PROFILE_KEY = 'user_profile';
