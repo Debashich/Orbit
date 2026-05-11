@@ -9,11 +9,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface UserProfile {
-    height: string;
-    weight: string;
-    visionImpairment: string;
-    guidanceType: string;
-    language?: string;
+    visionDescription: string;
+    language: string;
+    locationContext: string;
+    helpNeeded: string;
+    responseStyle: string;
+    // Keep old fields for backward compatibility or remove if not needed. 
+    // Given the request, I will replace them.
+    height?: string; 
 }
 
 const USER_PROFILE_KEY = 'user_profile';

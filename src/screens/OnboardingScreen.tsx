@@ -33,29 +33,29 @@ const SafeIcon = ({ set, name, size, color }: any) => {
 
 const QUESTIONS = [
     {
-        title: "What is your height?",
-        subtitle: "This helps customize your visual feedback.",
-        placeholder: "e.g. 5'10 or 178cm",
+        title: "How would you describe your vision?",
+        subtitle: "This helps Clara understand your perspective.",
+        placeholder: "e.g. Totally blind, low vision",
     },
     {
-        title: "What is your weight?",
-        subtitle: "Required for accurate health and movement tracking.",
-        placeholder: "e.g. 70kg or 154lbs",
+        title: "Which language do you prefer Clara to speak in?",
+        subtitle: "Select your primary language for interaction.",
+        placeholder: "e.g. English, Hindi, Spanish",
     },
     {
-        title: "How long have you had vision impairment?",
-        subtitle: "Helps us tailor the complexity of our audio guidance.",
-        placeholder: "e.g. 5 years",
+        title: "Where do you spend most of your time?",
+        subtitle: "Helps tailor navigation and environmental context.",
+        placeholder: "e.g. At home, in the city, outdoors",
     },
     {
-        title: "How would you like your guidance?",
-        subtitle: "Choose between detailed or concise audio descriptions.",
-        placeholder: "e.g. Detailed",
+        title: "What tasks do you need the most help with?",
+        subtitle: "Clara will prioritize these assistances.",
+        placeholder: "e.g. Reading, walking, finding objects",
     },
     {
-        title: "What is your preferred language?",
-        subtitle: "Select the language you want to speak and hear.",
-        placeholder: "e.g. English, Spanish, Hindi",
+        title: "How do you like Clara to respond?",
+        subtitle: "Choose the tone and detail of responses.",
+        placeholder: "e.g. Concise, descriptive, friendly",
     },
 ];
 
@@ -93,7 +93,7 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
     }, [speak, stop]);
 
     useEffect(() => {
-        if (currentStep > 0) {
+        if (currentStep >= 0) {
             const question = QUESTIONS[currentStep];
             speak(`${question.title}. ${question.subtitle}`);
         }
@@ -136,11 +136,11 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
             setIsSaving(true);
             try {
                 const success = await saveUserProfile({
-                    height: answers[0],
-                    weight: answers[1],
-                    visionImpairment: answers[2],
-                    guidanceType: answers[3],
-                    language: answers[4] || 'English',
+                    visionDescription: answers[0],
+                    language: answers[1] || 'English',
+                    locationContext: answers[2],
+                    helpNeeded: answers[3],
+                    responseStyle: answers[4],
                 });
 
                 if (success) {

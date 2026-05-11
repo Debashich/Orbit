@@ -19,8 +19,8 @@ function BootScreen() {
         
         // 1. Check if user profile exists
         const profile = await getUserProfile();
-        // Fallback safety check: if profile is 'test', treat it as no profile so user can actually onboard.
-        if (!profile || profile.height === 'test') {
+        // Fallback safety check
+        if (!profile || (profile as any).visionDescription === 'test') {
           navigation.replace('Onboarding');
           return;
         }
