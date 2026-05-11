@@ -10,6 +10,7 @@ import {
     Dimensions,
     Alert,
     ScrollView,
+    Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -246,10 +247,9 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
                 {/* HEADER */}
                 <View style={styles.header}>
                     <View style={styles.logoContainer}>
-                        <SafeIcon set="Ionicons" name="eye" size={28} color="#d946ef" />
+                        <Image source={require('../../assets/logo.png')} style={{ width: 36, height: 36, borderRadius: 8 }} />
                         <Text style={styles.logoText}>
                             <Text style={{ color: '#fff' }}>Orbit</Text>
-                            <Text style={{ color: '#d946ef' }}>AI</Text>
                         </Text>
                     </View>
                     <TouchableOpacity onPress={() => navigation.navigate('Download')}>

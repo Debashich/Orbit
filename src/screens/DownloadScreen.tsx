@@ -256,11 +256,10 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
           {/* HEADER */}
           <View style={styles.header}>
             <View style={styles.logoContainer}>
-              <SafeIcon set="Ionicons" name="eye" size={24} color="#d946ef" />
-              <Text style={styles.logoText}>
-                <Text style={{ color: '#fff' }}>Orbit</Text>
-                <Text style={{ color: '#d946ef' }}>AI</Text>
-              </Text>
+            <Image source={require('../../assets/logo.png')} style={{ width: 32, height: 32, borderRadius: 8, marginRight: 10 }} />
+            <Text style={styles.logoText}>
+              <Text style={{ color: '#fff' }}>Orbit</Text>
+            </Text>
             </View>
           </View>
 

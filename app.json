@@ -14,12 +14,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.Orbit"
+      "bundleIdentifier": "com.app.orbit.ai"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0b0b2b"
       },
       "edgeToEdgeEnabled": true,
       "largeHeap": true,
@@ -32,7 +32,7 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.CAMERA"
       ],
-      "package": "com.anonymous.Orbit"
+      "package": "com.app.orbit.ai"
     },
     "web": {
       "favicon": "./assets/favicon.png"

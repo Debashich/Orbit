@@ -516,11 +516,10 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
           <View style={styles.logoContainer}>
-            <SafeIcon set="Ionicons" name="eye" size={24} color="#d946ef" />
+            <Image source={require('../../assets/logo.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
             <View>
               <Text style={styles.logoText}>
                 <Text style={{ color: '#fff' }}>Orbit</Text>
-                <Text style={{ color: '#d946ef' }}>AI</Text>
               </Text>
               {currentWeather && (
                 <Text style={styles.weatherSubtext}>
