@@ -34,7 +34,7 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'completed' | 'error'>('idle');
   const [progress, setProgress] = useState(0);
   const [downloadedMB, setDownloadedMB] = useState(0);
-  const [totalMB, setTotalMB] = useState(1600); // Updated to ~1.6GB for Gemma 4 E2B Q4_K_M
+  const [totalMB, setTotalMB] = useState(4446);
   const [downloadPhase, setDownloadPhase] = useState<'model' | 'mmproj'>('model');
   const insets = useSafeAreaInsets();
   const bottomPadding = insets.bottom > 0 ? insets.bottom : 12;
@@ -199,12 +199,6 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
                 <Text style={{ color: '#d946ef' }}>Voice</Text>
               </Text>
             </View>
-            <View style={styles.avatarContainer}>
-              {/* Fallback avatar shape if we don't have an image source */}
-              <View style={styles.avatarPlaceholder}>
-                <SafeIcon set="Ionicons" name="person" size={16} color="#0b0b2b" />
-              </View>
-            </View>
           </View>
 
           {/* TITLE SECTION */}
@@ -227,10 +221,11 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
               <SafeIcon set="MaterialCommunityIcons" name="cpu-64-bit" size={32} color="#f0abfc" />
             </View>
 
-            <Text style={styles.cardTitle}>Gemma 4 E2B (~1.8GB)</Text>
-            <Text style={styles.cardSubtitle}>
-              Multimodal AI with vision & language — {downloadPhase === 'mmproj' ? 'downloading vision module...' : 'powers image analysis & conversation'}.
-            </Text>
+            <Text style={styles.cardTitle}>Gemma 4 E2B</Text>
+            
+            <View style={{ width: '100%', marginBottom: 25, marginTop: 10 }}>
+                <Text style={{ color: '#e2e8f0', fontSize: 13, marginBottom: 5, textAlign: 'center' }}>Offline AI model</Text>
+            </View>
 
             {/* PROGRESS BAR */}
             <View style={styles.progressHeader}>
@@ -249,11 +244,7 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
               />
             </View>
 
-            {/* INFO TEXT */}
-            <View style={styles.infoRow}>
-              <SafeIcon set="Ionicons" name="checkmark-circle" size={16} color="#a5b4fc" />
-              <Text style={styles.infoText}>Download once. Works offline forever.</Text>
-            </View>
+
 
             {/* BUTTON */}
             <TouchableOpacity 
@@ -312,35 +303,7 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
         </ScrollView>
       </SafeAreaView>
 
-      {/* BOTTOM TAB BAR (Overlay) */}
-      <View style={[styles.bottomTabBar, { paddingBottom: bottomPadding + 10 }]}>
-        <TouchableOpacity 
-          style={styles.tabIcon}
-          onPress={() => navigation.navigate('Chat')}
-        >
-          <SafeIcon set="MaterialCommunityIcons" name="history" size={28} color="#94a3b8" />
-        </TouchableOpacity>
 
-        {/* GLOWING CHAT BUTTON */}
-        <View style={styles.tabMicWrapper}>
-          <View style={styles.micGlow} />
-          <TouchableOpacity 
-            activeOpacity={0.8}
-            onPress={() => navigation.navigate('Chat')}
-          >
-            <LinearGradient
-              colors={['#d946ef', '#9333ea']}
-              style={styles.tabMicButton}
-            >
-              <SafeIcon set="Ionicons" name="chatbubble-ellipses" size={32} color="white" />
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity style={styles.tabIcon}>
-          <SafeIcon set="Ionicons" name="settings-sharp" size={26} color="#94a3b8" />
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }

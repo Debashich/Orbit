@@ -9,6 +9,7 @@ import {
     Platform,
     Dimensions,
     Alert,
+    ScrollView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -218,51 +219,55 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
 
                 <KeyboardAvoidingView
                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={styles.content}
+                    style={{ flex: 1 }}
                 >
-                    {/* STEP COUNTER */}
-                    <Text style={styles.stepCounter}>
-                        {currentStep + 1} / {TOTAL_STEPS}
-                    </Text>
+                    <ScrollView 
+                        contentContainerStyle={styles.content}
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                    >
+                        {/* STEP COUNTER */}
+                        <Text style={styles.stepCounter}>
+                            {currentStep + 1} / {TOTAL_STEPS}
+                        </Text>
 
-                    {/* QUESTION TEXT */}
-                    <View style={styles.textWrap}>
-                        <Text style={styles.title}>{QUESTIONS[currentStep].title}</Text>
-                        <Text style={styles.subtitle}>{QUESTIONS[currentStep].subtitle}</Text>
-                    </View>
-
-                    {/* INPUT SECTION */}
-                    <View style={styles.inputCard}>
-                        <TextInput
-                            style={styles.input}
-                            placeholder={QUESTIONS[currentStep].placeholder}
-                            placeholderTextColor="rgba(255,255,255,0.2)"
-                            value={answers[currentStep]}
-                            onChangeText={updateAnswer}
-                            autoFocus={true}
-                        />
-
-                        <View style={styles.micSection}>
-                            <View style={styles.waveformContainer}>
-                                {[12, 18, 10, 24, 14, 20, 10, 16].map((h, i) => (
-                                    <View key={i} style={[styles.waveBar, { height: h }]} />
-                                ))}
-                            </View>
-                            <Text style={styles.tapToSpeak}>TAP TO SPEAK</Text>
-                            {!!transcript && (
-                                <Text style={[styles.tapToSpeak, { marginTop: 10, color: '#d946ef' }]}>{transcript}</Text>
-                            )}
+                        {/* QUESTION TEXT */}
+                        <View style={styles.textWrap}>
+                            <Text style={styles.title}>{QUESTIONS[currentStep].title}</Text>
+                            <Text style={styles.subtitle}>{QUESTIONS[currentStep].subtitle}</Text>
                         </View>
-                    </View>
 
-                    {/* MIC BUTTON */}
-                    <View style={styles.micButtonContainer}>
-                        <TouchableOpacity activeOpacity={0.8} onPress={handleMicPress}>
-                            <View style={[styles.micButton, { backgroundColor: isListening ? '#dc2626' : '#9333ea' }]}> 
-                                <SafeIcon set="Ionicons" name={isListening ? 'stop' : 'mic'} size={36} color="white" />
+                        {/* INPUT SECTION */}
+                        <View style={styles.inputCard}>
+                            <TextInput
+                                style={styles.input}
+                                placeholder={QUESTIONS[currentStep].placeholder}
+                                placeholderTextColor="rgba(255,255,255,0.2)"
+                                value={answers[currentStep]}
+                                onChangeText={updateAnswer}
+                                autoFocus={true}
+                                multiline={true}
+                            />
+
+                            <View style={styles.micSection}>
+                                <View style={styles.waveformContainer}>
+                                    {[12, 18, 10, 24, 14, 20, 10, 16].map((h, i) => (
+                                        <View key={i} style={[styles.waveBar, { height: h }]} />
+                                    ))}
+                                </View>
+                                <Text style={styles.tapToSpeak}>TAP TO SPEAK</Text>
                             </View>
-                        </TouchableOpacity>
-                    </View>
+
+                            {/* MIC BUTTON IN CARD FOR BETTER RESPONSIVENESS */}
+                            <View style={styles.micButtonContainer}>
+                                <TouchableOpacity activeOpacity={0.8} onPress={handleMicPress}>
+                                    <View style={[styles.micButton, { backgroundColor: isListening ? '#dc2626' : '#9333ea' }]}> 
+                                        <SafeIcon set="Ionicons" name={isListening ? 'stop' : 'mic'} size={36} color="white" />
+                                    </View>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </ScrollView>
                 </KeyboardAvoidingView>
 
                 {/* BOTTOM NAVIGATION */}
@@ -352,9 +357,10 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.1)',
     },
     content: {
-        flex: 1,
+        flexGrow: 1,
         alignItems: 'center',
         justifyContent: 'center',
+        paddingVertical: 10,
     },
     stepCounter: {
         color: '#777',
@@ -385,7 +391,8 @@ const styles = StyleSheet.create({
         width: '100%',
         backgroundColor: 'rgba(255, 255, 255, 0.03)',
         borderRadius: 28,
-        paddingVertical: 40,
+        paddingTop: 30,
+        paddingBottom: 25,
         paddingHorizontal: 20,
         alignItems: 'center',
         borderWidth: 1,
@@ -393,13 +400,15 @@ const styles = StyleSheet.create({
     },
     input: {
         color: '#fff',
-        fontSize: 28,
+        fontSize: 22,
         textAlign: 'center',
         width: '100%',
         fontWeight: '600',
+        minHeight: 30,
+        maxHeight: 120,
     },
     micSection: {
-        marginTop: 40,
+        marginTop: 25,
         alignItems: 'center',
     },
     waveformContainer: {
@@ -420,7 +429,7 @@ const styles = StyleSheet.create({
         letterSpacing: 2,
     },
     micButtonContainer: {
-        marginTop: 30,
+        marginTop: 25,
     },
     micButton: {
         width: 80,
