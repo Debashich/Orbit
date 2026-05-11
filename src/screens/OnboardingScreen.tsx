@@ -13,10 +13,11 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as Icons from '@expo/vector-icons';
-import { saveUserProfile } from '../../database/db';
+import { saveUserProfile, getUserProfile } from '../../database/db';
 import { useTTS } from '../hooks/useTTS';
 import { useSTT } from '../hooks/useSTT';
 import { checkMicrophonePermission } from '../services/speech/stt';
+import { refreshTTSLanguage } from '../services/speech/tts';
 
 const { width } = Dimensions.get('window');
 
@@ -69,6 +70,7 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState(['', '', '', '', '']);
     const [isSaving, setIsSaving] = useState(false);
+    const [isInitialized, setIsInitialized] = useState(false);
     const insets = useSafeAreaInsets();
     const bottomPadding = insets.bottom > 0 ? insets.bottom : 12;
 
@@ -77,27 +79,28 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
             console.log('[Screen] 🚀 OnboardingScreen mounted, requesting permissions...');
             const granted = await checkMicrophonePermission();
             console.log('[Screen] 🔐 Permission granted:', granted);
+            setIsInitialized(true);
         };
         init();
     }, []);
 
     useEffect(() => {
+        if (!isInitialized) return;
         console.log('[Screen] 🎤 Speaking welcome message...');
         const welcomeMsg = 'Welcome to Clara';
-        console.log('[Screen] 📢 Calling speak with:', welcomeMsg);
         speak(welcomeMsg);
         return () => {
-            console.log('[Screen] 🧹 Cleanup: stopping speech');
             stop();
         };
-    }, [speak, stop]);
+    }, [isInitialized]);
 
     useEffect(() => {
+        if (!isInitialized) return;
         if (currentStep >= 0) {
             const question = QUESTIONS[currentStep];
             speak(`${question.title}. ${question.subtitle}`);
         }
-    }, [currentStep]);
+    }, [currentStep, isInitialized]);
 
     useEffect(() => {
         if (transcript.trim()) {
@@ -111,13 +114,14 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
             return;
         }
 
+        // Fast path: Stop current speech and start listening with a very short instruction
         await stop();
         
-        speak('Go ahead, speak now', () => {
+        // Start listening almost immediately for a faster feel
+        speak('Listening', () => {
             setTimeout(() => {
-                console.log('[Screen] Starting to listen after TTS');
                 startListening();
-            }, 100);
+            }, 50);
         });
     };
 
@@ -135,15 +139,18 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
             // Last step — save and navigate
             setIsSaving(true);
             try {
-                const success = await saveUserProfile({
+                const profileData = {
                     visionDescription: answers[0],
                     language: answers[1] || 'English',
                     locationContext: answers[2],
                     helpNeeded: answers[3],
                     responseStyle: answers[4],
-                });
+                };
+                const success = await saveUserProfile(profileData);
 
                 if (success) {
+                    // One final sync before moving on
+                    await refreshTTSLanguage(profileData.language);
                     navigation.navigate('Download');
                 } else {
                     Alert.alert('Oops!', 'Could not save your profile. Please try again.', [{ text: 'OK' }]);
@@ -163,10 +170,16 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
         }
     };
 
-    const updateAnswer = (text: string) => {
+    const updateAnswer = async (text: string) => {
         const newAnswers = [...answers];
         newAnswers[currentStep] = text;
         setAnswers(newAnswers);
+
+        // SYNC LANGUAGE: If this is the language question (Step 2, Index 1), sync immediately
+        if (currentStep === 1 && text.trim().length > 2) {
+            console.log(`[Onboarding] 🌐 Syncing language to: ${text}`);
+            await refreshTTSLanguage(text);
+        }
     };
 
     const isLastStep = currentStep === TOTAL_STEPS - 1;
