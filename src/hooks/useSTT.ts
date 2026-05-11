@@ -11,8 +11,15 @@ export const useSTT = () => {
     console.log('[Hook] 🎯 startListening called, isListeningRef:', isListeningRef.current);
     
     if (isListeningRef.current) {
-      console.log('[Hook] ⚠️ Already listening, skipping');
-      return;
+      // If we are listening, but the state `isListening` is false, it means the wake word detector is running.
+      // We should interrupt it to start a manual listening session.
+      if (!isListening) {
+        console.log('[Hook] 🛑 Interrupting wake word listener for manual listening');
+        await stopVoice();
+      } else {
+        console.log('[Hook] ⚠️ Already in manual listening session, skipping');
+        return;
+      }
     }
     
     console.log('[Hook] 📍 Setting listening state to true');
@@ -32,9 +39,9 @@ export const useSTT = () => {
       },
       options
     );
-  }, []);
+  }, [isListening]);
 
-  const startWakeWordDetection = useCallback(async (onDetected: () => void) => {
+  const startWakeWordDetection = useCallback(async (onDetected: () => void, onEnded?: () => void) => {
     console.log('[Hook] 👂 Starting wake word detection...');
     
     if (isListeningRef.current) return;
@@ -58,6 +65,7 @@ export const useSTT = () => {
       () => {
         console.log('[Hook] 🏁 Wake word detection session ended');
         isListeningRef.current = false;
+        if (onEnded) onEnded();
       },
       { continuous: true, interimResults: true }
     );

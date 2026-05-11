@@ -72,6 +72,7 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
     const [answers, setAnswers] = useState(['', '', '', '', '']);
     const [isSaving, setIsSaving] = useState(false);
     const [isInitialized, setIsInitialized] = useState(false);
+    const [wakeWordTrigger, setWakeWordTrigger] = useState(0);
     const isWakeWordActive = useRef(false);
     const insets = useSafeAreaInsets();
     const bottomPadding = insets.bottom > 0 ? insets.bottom : 12;
@@ -98,22 +99,32 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
         const runWakeWord = async () => {
             if (isInitialized && !isListening && isMounted && !isWakeWordActive.current && !isSaving) {
                 isWakeWordActive.current = true;
-                await startWakeWordDetection(() => {
-                    isWakeWordActive.current = false;
-                    if (isMounted) {
-                        speak("I'm listening", () => {
-                            setTimeout(() => {
-                                startListening();
-                            }, 50);
-                        });
+                await startWakeWordDetection(
+                    // onDetected
+                    () => {
+                        isWakeWordActive.current = false;
+                        if (isMounted) {
+                            speak("I'm listening", () => {
+                                setTimeout(() => {
+                                    startListening();
+                                }, 50);
+                            });
+                        }
+                    },
+                    // onEnded (restart loop if no speech detected)
+                    () => {
+                        isWakeWordActive.current = false;
+                        if (isMounted) {
+                            setWakeWordTrigger(prev => prev + 1);
+                        }
                     }
-                });
+                );
             }
         };
 
         runWakeWord();
         return () => { isMounted = false; };
-    }, [isListening, isInitialized, isSaving]);
+    }, [isListening, isInitialized, isSaving, wakeWordTrigger]);
 
     useEffect(() => {
         if (!isInitialized) return;
