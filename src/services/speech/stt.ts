@@ -38,9 +38,13 @@ export const checkMicrophonePermission = async () => {
   }
 };
 
-export const startVoice = async (onResult: (text: string) => void, onEnd: () => void) => {
+export const startVoice = async (
+  onResult: (text: string) => void, 
+  onEnd: () => void, 
+  options: { continuous?: boolean; interimResults?: boolean } = {}
+) => {
   try {
-    console.log('[STT] 📢 Starting voice recognition...');
+    console.log(`[STT] 📢 Starting voice recognition (continuous: ${!!options.continuous})...`);
     
     if (isListeningNow) {
       console.log('[STT] ⚠️ Already listening, ending duplicate start request');
@@ -102,7 +106,8 @@ export const startVoice = async (onResult: (text: string) => void, onEnd: () => 
     console.log(`[STT] 🚀 Calling module.start() with lang: ${langCode}`);
     ExpoSpeechRecognitionModule.start({
       lang: langCode,
-      interimResults: true,
+      interimResults: options.interimResults ?? true,
+      continuous: options.continuous ?? false,
     });
     console.log('[STT] ✅ start() called successfully');
   } catch (err) {

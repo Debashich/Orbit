@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Dimensions,
   ScrollView,
   ActivityIndicator,
   Image,
@@ -22,15 +21,21 @@ import { useSTT } from '../hooks/useSTT';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { initLlama, LlamaContext } from 'llama.rn';
 import RNFS from 'react-native-fs';
-import { ASSISTIVE_VISION_PROTOCOL, GENERAL_ASSISTANT_PROTOCOL, INTENT_CLASSIFICATION_PROMPT, Intent } from '../constants/prompts';
+import { 
+  CLARA_MOBILITY_PROTOCOL, 
+  ASSISTIVE_DESCRIPTION_PROTOCOL, 
+  GENERAL_ASSISTANT_PROTOCOL, 
+  INTENT_CLASSIFICATION_PROMPT, 
+  LANGUAGE_SWITCH_CONFIRMATION_PROMPT,
+  Intent 
+} from '../constants/prompts';
 import { getCurrentLocation, LocationData } from '../services/location';
-import { isCameraCommand, extractCameraPrompt } from '../services/camera';
+import { extractCameraPrompt } from '../services/camera';
+import { getWeatherData } from '../services/weather';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { getUserProfile, saveUserProfile } from '../../database/db';
 import { getSafePromptLanguageName } from '../constants/languages';
 import { refreshTTSLanguage } from '../services/speech/tts';
-
-const { width } = Dimensions.get('window');
 
 // Safe Icon wrapper
 const SafeIcon = ({ set, name, size, color }: any) => {
@@ -47,12 +52,15 @@ const WAVE_HEIGHTS = [15, 25, 45, 60, 45, 65, 45, 55, 35, 20, 15];
 
 const isValidResponse = (text: string): boolean => {
   const lowerText = text.toLowerCase();
-  // Check for navigation keywords and actionable instructions
-  const hasLocation = lowerText.includes('ahead') || lowerText.includes('left') || lowerText.includes('right') || lowerText.includes('center');
-  const hasAction = lowerText.includes('stop') || lowerText.includes('walk') || lowerText.includes('duck') || lowerText.includes('move') || lowerText.includes('proceed') || lowerText.includes('clear');
-  const isClear = lowerText.includes('path clear');
+  // Check for Mobility format: "<hazard> <location>. <action>."
+  const hasLocation = lowerText.includes('ahead') || lowerText.includes('left') || lowerText.includes('right') || lowerText.includes('center') || lowerText.includes('forward');
+  const hasAction = lowerText.includes('stop') || lowerText.includes('walk') || lowerText.includes('duck') || lowerText.includes('move') || lowerText.includes('proceed') || lowerText.includes('clear') || lowerText.includes('wait') || lowerText.includes('stay');
+  const isPathClear = lowerText.includes('path clear');
   
-  return (hasLocation && hasAction) || isClear;
+  // Check for Description format: "Object: 5m, center, approaching. Stop."
+  const hasDistance = lowerText.includes('m') || lowerText.includes('meter');
+  
+  return (hasLocation && hasAction) || isPathClear || (hasDistance && hasLocation);
 };
 
 interface Message {
@@ -69,10 +77,36 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   const navigation = propNavigation || hookNavigation;
   const route = propRoute || hookRoute;
   const { speak, stop } = useTTS();
-  const { transcript, isListening, startListening, stopListening } = useSTT();
+  const { transcript, isListening, startListening, stopListening, startWakeWordDetection } = useSTT();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
+  const isWakeWordActive = useRef(false);
+
+  // Wake word detection loop
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    
+    const runWakeWord = async () => {
+      if (!isListening && !isGenerating && !isInitializing && !isWakeWordActive.current) {
+        isWakeWordActive.current = true;
+        console.log('[Home] 👂 Starting background wake word detection...');
+        await startWakeWordDetection(() => {
+          isWakeWordActive.current = false;
+          handleMicPress(); // Trigger active listening
+        });
+      }
+    };
+
+    if (!isListening && !isGenerating && !isInitializing) {
+      timeout = setTimeout(runWakeWord, 1000);
+    } else {
+      isWakeWordActive.current = false;
+    }
+
+    return () => clearTimeout(timeout);
+  }, [isListening, isGenerating, isInitializing]);
+
   const scrollViewRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
   // If insets.bottom is 0 (button navigation), add padding; if > 0 (gesture nav), use insets
@@ -83,20 +117,53 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   const [location, setLocation] = useState<LocationData | null>(null);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const [lastIntent, setLastIntent] = useState<Intent | null>(null);
-  const pendingImageRef = useRef<{ uri: string; prompt: string; command: string } | null>(null);
   const lastProcessedTranscript = useRef<string>('');
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsLanguage, setSettingsLanguage] = useState('');
+  const [currentWeather, setCurrentWeather] = useState<any>(null);
+
+  const getSensorContext = (loc: LocationData | null) => {
+    if (!loc) return "Motion: unknown. Direction: unknown. ";
+    // speed is in m/s. 0.5 m/s is ~1.8 km/h (slow walk)
+    const motion = (loc.speed !== null && loc.speed > 0.5) ? "walking" : "stopped";
+    let direction = "facing forward";
+    if (loc.heading !== null) {
+      if (loc.heading > 45 && loc.heading <= 135) direction = "facing right";
+      else if (loc.heading > 135 && loc.heading <= 225) direction = "facing backward";
+      else if (loc.heading > 225 && loc.heading <= 315) direction = "facing left";
+    }
+    return `Motion: ${motion}. Direction: ${direction}. `;
+  };
+
   const classifyIntent = async (text: string): Promise<Intent> => {
-    if (!context) return 'UNCERTAIN';
-    
-    // Quick keyword override for safety/common cases
     const lower = text.toLowerCase();
-    if (lower.match(/\b(safe|walk|ahead|blocking|door|car|clear|see|look|identify)\b/)) {
+    
+    // INSTANT HEURISTICS (Multi-language Support & Follow-ups)
+    // Safety / Vision Required (English, Hindi)
+    if (lower.match(/\b(safe|walk|ahead|blocking|door|car|clear|obstacle|path|danger|stop|go|चल|खतरा|साफ|रुक|सामने)\b/)) {
       return 'VISION_REQUIRED';
     }
+    // Follow-ups
+    if (lower.match(/\b(now|about now|again|once more|फिर से|अभी)\b/)) {
+       if (lastIntent === 'VISION_REQUIRED') return 'VISION_REQUIRED';
+       if (lastIntent === 'VISION_OPTIONAL') return 'VISION_OPTIONAL';
+    }
+    // Descriptive
+    if (lower.match(/\b(describe|what is|read|text|color|label|recognize|identify|looking at|क्या है|देखे|बताओ)\b/)) {
+      return 'VISION_OPTIONAL';
+    }
+    // Language
+    if (lower.match(/\b(speak in|language|switch to|hindi|spanish|english|french|german|bengali|हिंदी|अंग्रेजी|भाषा)\b/)) {
+      return 'LANGUAGE_SWITCH';
+    }
+    // Conversational
+    if (lower.match(/\b(hello|hi|how are you|who are you|time|weather|joke|नमस्ते)\b/)) {
+      return 'NON_VISION';
+    }
 
+    if (!context) return 'UNCERTAIN';
+    // Fallback to LLM
     const prompt = `<start_of_turn>user\n${INTENT_CLASSIFICATION_PROMPT.replace('{query}', text)}<end_of_turn>\n<start_of_turn>model\n`;
     
     let result = '';
@@ -128,6 +195,10 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         const loc = await getCurrentLocation();
         setLocation(loc);
 
+        if (loc) {
+          getWeatherData(loc.latitude, loc.longitude).then(setCurrentWeather);
+        }
+
         const modelPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-q4km.gguf`;
         const mmprojPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-mmproj.gguf`;
         const modelExists = await RNFS.exists(modelPath);
@@ -141,32 +212,22 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         const llamaConfig: any = {
           model: modelPath,
           use_mlock: false,
-          n_ctx: 2048, // MUST be large enough to hold image tokens (256-512) + prompt + response
-          n_gpu_layers: 99, // Attempt GPU offloading — Mali-G57 MC2 supports OpenCL 2.0
+          n_ctx: 2048,
+          n_gpu_layers: 99,
         };
 
         const llamaContext = await initLlama(llamaConfig);
         
-        // Add multimodal projector for vision support if available
         if (mmprojExists) {
           try {
-            const mmResult = await llamaContext.initMultimodal({ 
+            await llamaContext.initMultimodal({ 
               path: mmprojPath,
-              image_max_tokens: 256, // 256 is the minimum that works with this projector
+              image_max_tokens: 256,
             });
-            console.log('[Home] initMultimodal returned:', mmResult);
-            const mmEnabled = await llamaContext.isMultimodalEnabled();
-            console.log('[Home] isMultimodalEnabled:', mmEnabled);
-            if (mmEnabled) {
-              console.log('[Home] ✅ Vision mode confirmed active');
-            } else {
-              console.error('[Home] ❌ Vision mode failed to activate despite no error');
-            }
+            console.log('[Home] ✅ Vision mode active');
           } catch (err) {
             console.error('[Home] Failed to load mmproj:', err);
           }
-        } else {
-          console.log('[Home] mmproj not found, text-only mode');
         }
         
         setContext(llamaContext);
@@ -175,7 +236,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         setMessages([
           {
             id: '1',
-            text: `Hello! I am Clara. I've detected your location as ${loc?.address || 'unknown'}. How can I help you today?`,
+            text: `Hello! I am Clara. How can I help you today?`,
             sender: 'ai',
             timestamp: new Date(),
           },
@@ -183,7 +244,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         speak(`Hello! I am Clara. How can I help you today?`);
       } catch (error) {
         console.error('Initialization error:', error);
-        setIsInitializing(false); // don't block forever
+        setIsInitializing(false);
       }
     };
 
@@ -198,7 +259,6 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   }, []);
 
   useEffect(() => {
-    // Auto-scroll to bottom when messages change
     if (scrollViewRef.current) {
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -207,50 +267,41 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   }, [messages, isGenerating]);
 
   const openCamera = useCallback(
-    (command: string, analysisPrompt: string) => {
+    (command: string, analysisPrompt: string, intent: Intent = 'VISION_REQUIRED') => {
       navigation.navigate('Camera', {
         command,
         analysisPrompt,
         onCapture: (uri: string, cmd: string, prompt: string) => {
-          // Process the captured image directly
-          analyzeImage(uri, prompt, cmd);
+          analyzeImage(uri, prompt, cmd, intent);
         }
       });
     },
     [navigation]
   );
 
-  // Note: We no longer rely on useEffect and route.params to trigger analyzeImage.
-  // It is now handled safely via the onCapture callback to prevent screen remounting bugs.
-
-  // Handle automatic sending when transcript is captured
   useEffect(() => {
     if (transcript && transcript !== lastProcessedTranscript.current && !isListening && !isGenerating && !isAnalyzingImage) {
-      console.log('--- Triggering Intent Check ---');
-      console.log('Final Transcript:', transcript);
-      
       lastProcessedTranscript.current = transcript;
       
       const processIntent = async () => {
         const intent = await classifyIntent(transcript);
-        setLastIntent(intent);
         console.log('[Home] Detected intent:', intent);
 
-        if (intent === 'VISION_REQUIRED') {
-          console.log('[Home] Smart camera trigger');
+        if (intent === 'VISION_REQUIRED' || intent === 'VISION_OPTIONAL') {
           const analysisPrompt = extractCameraPrompt(transcript);
-          speak('Checking surroundings.', () => {
-            openCamera(transcript, analysisPrompt);
+          const feedback = intent === 'VISION_REQUIRED' ? 'Checking surroundings.' : 'Looking now.';
+          speak(feedback, () => {
+            openCamera(transcript, analysisPrompt, intent);
           });
+          setLastIntent(intent);
           return;
         }
-        // Handle "Yes" to VISION_OPTIONAL or UNCERTAIN follow-ups
+        
         const lower = transcript.toLowerCase();
         
         if (intent === 'LANGUAGE_SWITCH') {
-          console.log('[Home] Language switch intent detected. Extracting language...');
           let extractedLang = '';
-          const extractPrompt = `<start_of_turn>user\nExtract the target language from this text: "${transcript}". Reply ONLY with the standard English name of the language (e.g. "English", "Hindi", "Spanish"). If no language is found, reply "English".<end_of_turn>\n<start_of_turn>model\n`;
+          const extractPrompt = `<start_of_turn>user\nExtract target language from: "${transcript}". Reply ONLY with the name (e.g. "Hindi").<end_of_turn>\n<start_of_turn>model\n`;
           
           if (context) {
             await context.completion({
@@ -265,26 +316,35 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
 
           const cleanExtracted = extractedLang.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').trim();
           const safeLang = getSafePromptLanguageName(cleanExtracted);
-          console.log(`[Home] Extracted language raw: ${cleanExtracted}, Safe: ${safeLang}`);
           
           const profile = await getUserProfile();
           if (profile) {
             await saveUserProfile({ ...profile, language: safeLang });
             await refreshTTSLanguage(safeLang);
-            
-            // Send the original transcript to the AI, forcing it to use the newly saved profile language
-            sendMessage(transcript, 'NON_VISION');
+            setIsGenerating(true);
+            const confirmationPrompt = `<start_of_turn>user\n${LANGUAGE_SWITCH_CONFIRMATION_PROMPT.replace(/{language}/g, safeLang)}<end_of_turn>\n<start_of_turn>model\n`;
+            let confirmationMsg = '';
+            if (context) {
+              await context.completion({ prompt: confirmationPrompt, n_predict: 40, stop: ['<end_of_turn>', '<eos>'], temperature: 0.3 }, (res) => { confirmationMsg += res.token; });
+            }
+            const cleanConfirmation = confirmationMsg.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').trim();
+            const aiMsg: Message = { id: Date.now().toString(), text: cleanConfirmation || `Switched to ${safeLang}.`, sender: 'ai', timestamp: new Date() };
+            setMessages(prev => [...prev, { id: (Date.now() - 1).toString(), text: transcript, sender: 'user', timestamp: new Date() }, aiMsg]);
+            setIsGenerating(false);
+            speak(aiMsg.text);
             return;
           }
         }
-        if ((lower === 'yes' || lower === 'yeah' || lower === 'sure' || lower === 'do it') && 
+
+        if ((lower === 'yes' || lower === 'yeah' || lower === 'sure' || lower === 'do it' || lower.includes('हाँ') || lower.includes('करो')) && 
             (lastIntent === 'VISION_OPTIONAL' || lastIntent === 'UNCERTAIN')) {
           speak('Opening camera.', () => {
-            openCamera('Looking at surroundings', 'Describe the scene.');
+            openCamera('Looking at surroundings', 'Describe the scene.', 'VISION_OPTIONAL');
           });
           return;
         }
 
+        setLastIntent(intent);
         sendMessage(transcript, intent);
       };
 
@@ -294,17 +354,13 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
 
   const handleMicPress = async () => {
     if (isGenerating) return;
-
     await stop();
-
     if (isListening) {
       await stopListening();
       return;
     }
-
-    speak('Start speaking now', () => {
+    speak('Go ahead', () => {
       setTimeout(() => {
-        console.log('[Screen] Starting to listen after TTS');
         startListening();
       }, 100);
     });
@@ -312,26 +368,17 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
 
   const handleManualCameraPress = useCallback(async () => {
     if (isGenerating || isAnalyzingImage) return;
-    if (isListening) {
-      await stopListening();
-    }
+    if (isListening) await stopListening();
     await stop();
     speak('Opening camera now', () => {
-      openCamera('Capture image', 'Describe what you see in this image.');
+      openCamera('Capture image', 'Describe what you see in this image.', 'VISION_OPTIONAL');
     });
   }, [isGenerating, isAnalyzingImage, isListening, stopListening, stop, speak, openCamera]);
 
   const sendMessage = async (text: string, currentIntent: Intent = 'NON_VISION') => {
     if (isGenerating || !text.trim() || !context) return;
 
-    // Direct proactive responses for specific intents before even hitting the LLM if needed
-    if (currentIntent === 'VISION_OPTIONAL') {
-      const msg: Message = { id: Date.now().toString(), text: "I can look at that for you. Do you want me to open the camera?", sender: 'ai', timestamp: new Date() };
-      setMessages(prev => [...prev, { id: (Date.now() - 1).toString(), text, sender: 'user', timestamp: new Date() }, msg]);
-      speak(msg.text);
-      return;
-    }
-
+    // Type-safe proactive clarification for UNCERTAIN intent
     if (currentIntent === 'UNCERTAIN') {
       const msg: Message = { id: Date.now().toString(), text: "I'm not sure if you want me to look at something. Should I open the camera?", sender: 'ai', timestamp: new Date() };
       setMessages(prev => [...prev, { id: (Date.now() - 1).toString(), text, sender: 'user', timestamp: new Date() }, msg]);
@@ -339,289 +386,116 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       return;
     }
 
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      text: text.trim(),
-      sender: 'user',
-      timestamp: new Date(),
-    };
-
+    const userMsg: Message = { id: Date.now().toString(), text: text.trim(), sender: 'user', timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
     setIsGenerating(true);
 
     const assistantMsgId = (Date.now() + 1).toString();
-    const newAiMessage: Message = {
-      id: assistantMsgId,
-      text: '',
-      sender: 'ai',
-      timestamp: new Date(),
-    };
+    const newAiMessage: Message = { id: assistantMsgId, text: '', sender: 'ai', timestamp: new Date() };
     setMessages((prev) => [...prev, newAiMessage]);
 
     try {
-      // Refresh location for the most up-to-date context
       const currentLoc = await getCurrentLocation();
       setLocation(currentLoc);
-
-      const locationContext = currentLoc 
-        ? `User is currently at ${currentLoc.address} (Lat: ${currentLoc.latitude}, Lon: ${currentLoc.longitude}). `
-        : "User location is unavailable. ";
-
-      const profile = await getUserProfile();
-      const langName = getSafePromptLanguageName(profile?.language);
       
-      const userContext = profile 
-        ? `User Profile - Height: ${profile.height || 'unknown'}, Vision Impairment: ${profile.visionImpairment || 'unknown'}, Guidance Preference: ${profile.guidanceType || 'unknown'}. `
-        : "";
-
-      const fullContext = `${locationContext}${userContext}`;
-
-      const prompt = `System: You are Clara, a helpful AI assistant. ${locationContext}Respond concisely in ${langName}.
-User: ${userMsg.text}
-AI:`;
-
-      let fullResponse = '';
-      let attempt = 1;
-      const maxAttempts = 2;
-
-      while (attempt <= maxAttempts) {
-        fullResponse = '';
-        const languageInstruction = `\nCRITICAL: You MUST respond in ${langName} using its native script and alphabet (e.g., use Devanagari letters for Hindi, Cyrillic for Russian). DO NOT use Roman/Latin letters for other languages (no Hinglish).`;
-        const activeProtocol = currentIntent === 'NON_VISION' ? GENERAL_ASSISTANT_PROTOCOL : ASSISTIVE_VISION_PROTOCOL;
-        
-        const currentPrompt = attempt === 1 
-          ? `<start_of_turn>user\n${activeProtocol}\n\nContext: ${fullContext}\nUser message: ${userMsg.text}\nIMPORTANT: If the user is asking about something you cannot see, DO NOT say "I cannot see". Instead, suggest they say "look at this" to open the camera.${languageInstruction}\nFollow the OUTPUT CONTRACT strictly.<end_of_turn>\n<start_of_turn>model\n`
-          : `<start_of_turn>user\n${activeProtocol}\n\nContext: ${fullContext}\nUser message: ${userMsg.text}\nRETRY: Follow the FINAL SPEECH RULE: "<hazard> <location>. <action>."${languageInstruction}<end_of_turn>\n<start_of_turn>model\n`;
-
-        await context.completion(
-          {
-            prompt: currentPrompt,
-            n_predict: 150,
-            stop: ['<end_of_turn>', '<start_of_turn>', '</start_of_turn>', '<eos>'],
-            temperature: 0.2,
-            top_p: 0.8,
-          },
-          (res) => {
-            fullResponse += res.token;
-            const cleanText = fullResponse
-              .replace(/<\|channel>\w+/g, '')
-              .replace(/<channel\|>/g, '')
-              .replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '')
-              .trim();
-            
-            setMessages((prev) => 
-              prev.map((msg) => 
-                msg.id === assistantMsgId ? { ...msg, text: cleanText } : msg
-              )
-            );
+      let weatherInfo = "";
+      if (text.toLowerCase().includes('weather') || text.toLowerCase().includes('temperature')) {
+        if (currentLoc) {
+          console.log('[Home] ☁️ Fetching weather data...');
+          const weatherData = await getWeatherData(currentLoc.latitude, currentLoc.longitude);
+          if (weatherData) {
+            weatherInfo = `Current Weather: ${weatherData.temperature}°C, ${weatherData.description}, Humidity: ${weatherData.humidity}%. `;
           }
-        );
-
-        const finalAnswer = fullResponse.trim();
-        // If it's a non-vision conversational reply, validation might fail but that's okay for general chat
-        if (isValidResponse(finalAnswer) || currentIntent === 'NON_VISION') {
-          break;
-        } else {
-          attempt++;
         }
       }
+
+      const locationContext = currentLoc ? `User location: ${currentLoc.address}. ` : "";
+      const sensorContext = getSensorContext(currentLoc);
+      const profile = await getUserProfile();
+      const langName = getSafePromptLanguageName(profile?.language);
+      const fullContext = `${locationContext}${sensorContext}${weatherInfo}User profile: ${JSON.stringify(profile || {})}`;
       
-      const finalClean = fullResponse
-        .replace(/<\|channel>\w+/g, '')
-        .replace(/<channel\|>/g, '')
-        .replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '')
-        .trim();
-      if (finalClean) {
-        speak(finalClean);
+      let attempt = 1;
+      const maxAttempts = 2;
+      const languageInstruction = `\nCRITICAL: Respond in ${langName} using its native script and alphabet. NO Latin letters.`;
+      
+      let activeProtocol = GENERAL_ASSISTANT_PROTOCOL;
+      if (currentIntent === 'VISION_REQUIRED') activeProtocol = CLARA_MOBILITY_PROTOCOL;
+      else if (currentIntent === 'VISION_OPTIONAL') activeProtocol = ASSISTIVE_DESCRIPTION_PROTOCOL;
+
+      let fullResponse = '';
+      while (attempt <= maxAttempts) {
+        fullResponse = '';
+        const currentPrompt = `<start_of_turn>user\n${activeProtocol}\n\nContext: ${fullContext}\nUser: ${userMsg.text}${languageInstruction}\nFollow protocol strictly.<end_of_turn>\n<start_of_turn>model\n`;
+
+        await context.completion({ prompt: currentPrompt, n_predict: 150, stop: ['<end_of_turn>', '<start_of_turn>', '<eos>'], temperature: 0.2, top_p: 0.8 }, (res) => {
+          fullResponse += res.token;
+          const cleanText = fullResponse.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').replace(/<\|channel>\w+/g, '').replace(/<channel\|>/g, '').trim();
+          setMessages((prev) => prev.map((msg) => msg.id === assistantMsgId ? { ...msg, text: cleanText } : msg));
+        });
+
+        if (isValidResponse(fullResponse.trim()) || currentIntent === 'NON_VISION' || currentIntent === 'LANGUAGE_SWITCH') break;
+        attempt++;
       }
+      
+      const finalClean = fullResponse.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').trim();
+      if (finalClean) speak(finalClean);
     } catch (err) {
       console.error('Completion error:', err);
-      setMessages((prev) => 
-        prev.map((msg) => 
-          msg.id === assistantMsgId ? { ...msg, text: "Sorry, I encountered an error while thinking." } : msg
-        )
-      );
+      setMessages((prev) => prev.map((msg) => msg.id === assistantMsgId ? { ...msg, text: "Sorry, I encountered an error." } : msg));
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // Analyze a captured image using the multimodal model
-  const analyzeImage = async (imageUri: string, analysisPrompt: string, cameraCommand: string) => {
+  const analyzeImage = async (imageUri: string, analysisPrompt: string, cameraCommand: string, intent: Intent = 'VISION_REQUIRED') => {
     if (!contextRef.current || isAnalyzingImage) return;
-
     setIsAnalyzingImage(true);
-    
-    // Add user message with image
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      text: cameraCommand,
-      sender: 'user',
-      timestamp: new Date(),
-      imageUri: imageUri,
-    };
+    const userMsg: Message = { id: Date.now().toString(), text: cameraCommand, sender: 'user', timestamp: new Date(), imageUri };
     setMessages(prev => [...prev, userMsg]);
     setIsGenerating(true);
-
     const assistantMsgId = (Date.now() + 1).toString();
-    const newAiMessage: Message = {
-      id: assistantMsgId,
-      text: '',
-      sender: 'ai',
-      timestamp: new Date(),
-    };
+    const newAiMessage: Message = { id: assistantMsgId, text: '', sender: 'ai', timestamp: new Date() };
     setMessages((prev) => [...prev, newAiMessage]);
 
     try {
-      speak('Analyzing the image now...');
-
-      // Verify multimodal is still active (it can get lost after navigation)
-      const mmCheck = await contextRef.current.isMultimodalEnabled();
-      console.log('[Vision] Multimodal enabled check:', mmCheck);
-      
-      if (!mmCheck) {
-        console.log('[Vision] Multimodal not active, attempting re-init...');
-        const mmprojPath = `${RNFS.DocumentDirectoryPath}/gemma4-e2b-mmproj.gguf`;
-        const reInit = await contextRef.current.initMultimodal({
-          path: mmprojPath,
-          image_max_tokens: 256,
-        });
-        console.log('[Vision] Re-init result:', reInit);
-        const reCheck = await contextRef.current.isMultimodalEnabled();
-        if (!reCheck) {
-          throw new Error('Failed to re-enable multimodal after re-init');
-        }
-        console.log('[Vision] ✅ Multimodal re-enabled successfully');
-      }
-
-      const cleanPath = imageUri.replace('file://', '');
-      console.log('[Vision] Original image path:', cleanPath);
-      
-      // Resize image to 256x256 to dramatically speed up projector processing
-      console.log('[Vision] Resizing image to 256x256...');
-      const resizeStart = Date.now();
-      const resized = await manipulateAsync(
-        imageUri,
-        [{ resize: { width: 256, height: 256 } }],
-        { compress: 0.5, format: SaveFormat.JPEG }
-      );
+      speak('Analyzing now...');
+      const resized = await manipulateAsync(imageUri, [{ resize: { width: 256, height: 256 } }], { compress: 0.5, format: SaveFormat.JPEG });
       const resizedPath = resized.uri.replace('file://', '');
-      console.log('[Vision] Resized in', Date.now() - resizeStart, 'ms →', resized.width, 'x', resized.height);
-      console.log('[Vision] Resized image path:', resizedPath);
       
-      console.log('[Vision] Starting completion...');
-      const startTime = Date.now();
-
-      let fullResponse = '';
-      let tokenCount = 0;
-      let attempt = 1;
-      const maxAttempts = 2;
-
       const profile = await getUserProfile();
       const langName = getSafePromptLanguageName(profile?.language);
+      const currentLoc = await getCurrentLocation();
+      const sensorContext = getSensorContext(currentLoc);
+      const languageInstruction = `\nCRITICAL: Respond in ${langName} using its native script.`;
+      const activeProtocol = intent === 'VISION_REQUIRED' ? CLARA_MOBILITY_PROTOCOL : ASSISTIVE_DESCRIPTION_PROTOCOL;
 
-
-      const languageInstruction = `\nCRITICAL: You MUST respond in ${langName} using its native script and alphabet (e.g., use Devanagari letters for Hindi). DO NOT use Roman/Latin letters for other languages (no Hinglish).`;
+      let attempt = 1;
+      const maxAttempts = 2;
+      let fullResponse = '';
 
       while (attempt <= maxAttempts) {
         fullResponse = '';
-        tokenCount = 0;
-        
-        const currentPrompt = attempt === 1 
-          ? `<start_of_turn>user\n<__media__>\n${ASSISTIVE_VISION_PROTOCOL}\n\nUser request: ${analysisPrompt}${languageInstruction}\nFollow the OUTPUT CONTRACT strictly.<end_of_turn>\n<start_of_turn>model\n`
-          : `<start_of_turn>user\n<__media__>\n${ASSISTIVE_VISION_PROTOCOL}\n\nUser request: ${analysisPrompt}\nRETRY: Follow the FINAL SPEECH RULE: "<hazard> <location>. <action>."${languageInstruction}<end_of_turn>\n<start_of_turn>model\n`;
+        const currentPrompt = `<start_of_turn>user\n<__media__>\n${activeProtocol}\n\nContext: ${sensorContext}\nUser request: ${analysisPrompt}${languageInstruction}\nFollow protocol strictly.<end_of_turn>\n<start_of_turn>model\n`;
 
-        console.log(`[Vision] Attempt ${attempt} starting...`);
+        await contextRef.current.completion({ prompt: currentPrompt, n_predict: 100, stop: ['<end_of_turn>', '<start_of_turn>', '<eos>'], temperature: 0.2, top_p: 0.8, media_paths: [resizedPath] } as any, (res) => {
+          fullResponse += res.token || res.content || '';
+          const cleanText = fullResponse.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').replace(/<\|channel>\w+/g, '').replace(/<channel\|>/g, '').trim();
+          setMessages((prev) => prev.map((msg) => msg.id === assistantMsgId ? { ...msg, text: cleanText } : msg));
+        });
 
-        const completionPromise = contextRef.current.completion(
-          {
-            prompt: currentPrompt,
-            n_predict: 100,
-            stop: ['<end_of_turn>', '<start_of_turn>', '</start_of_turn>', '<eos>'],
-            temperature: 0.2, // Lower temperature for more deterministic output
-            top_p: 0.8,
-            media_paths: [resizedPath],
-          } as any,
-          (res) => {
-            tokenCount++;
-            const tok = res.token || res.content || '';
-            fullResponse += tok;
-            
-            const cleanText = fullResponse
-              .replace(/<\|channel>\w+/g, '')
-              .replace(/<channel\|>/g, '')
-              .replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '')
-              .trim();
-            
-            if (cleanText) {
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === assistantMsgId ? { ...msg, text: cleanText } : msg
-                )
-              );
-            }
-          }
-        );
-
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Image analysis timed out')), 180000)
-        );
-
-        await Promise.race([completionPromise, timeoutPromise]);
-
-        const finalAnswer = fullResponse
-          .replace(/<\|channel>\w+/g, '')
-          .replace(/<channel\|>/g, '')
-          .replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '')
-          .trim();
-
-        if (isValidResponse(finalAnswer)) {
-          console.log(`[Vision] Valid response on attempt ${attempt}`);
-          break;
-        } else {
-          console.warn(`[Vision] Invalid response on attempt ${attempt}: ${finalAnswer}`);
-          attempt++;
-          if (attempt <= maxAttempts) {
-            speak('Refining description...');
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-        }
+        if (isValidResponse(fullResponse.trim())) break;
+        attempt++;
       }
       
-      const finalCleanAnswer = fullResponse
-        .replace(/<\|channel>\w+/g, '')
-        .replace(/<channel\|>/g, '')
-        .replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '')
-        .trim();
-
-      if (finalCleanAnswer) {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMsgId ? { ...msg, text: finalCleanAnswer } : msg
-          )
-        );
-        
-        await stop();
-        await new Promise<void>((resolve) => {
-          speak(finalCleanAnswer);
-          const wordCount = finalCleanAnswer.split(' ').length;
-          const estimatedMs = Math.max(3000, wordCount * 400);
-          setTimeout(resolve, estimatedMs);
-        });
-      } else {
-        throw new Error('Empty response');
+      const finalClean = fullResponse.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').trim();
+      if (finalClean) {
+        speak(finalClean);
+        await new Promise(resolve => setTimeout(resolve, 4000));
       }
     } catch (err) {
       console.error('[Home] Image analysis error:', err);
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMsgId
-            ? { ...msg, text: 'Sorry, I could not analyze the image. Please try again.' }
-            : msg
-        )
-      );
-      speak('Sorry, I could not analyze the image. Please try again.');
-      await new Promise(resolve => setTimeout(resolve, 4000));
+      speak('Sorry, I could not analyze the image.');
     } finally {
       setIsGenerating(false);
       setIsAnalyzingImage(false);
@@ -640,95 +514,41 @@ AI:`;
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        {/* HEADER */}
         <View style={styles.header}>
           <View style={styles.logoContainer}>
             <SafeIcon set="Ionicons" name="eye" size={24} color="#d946ef" />
-            <Text style={styles.logoText}>
-              <Text style={{ color: '#fff' }}>Vision</Text>
-              <Text style={{ color: '#d946ef' }}>Voice</Text>
-            </Text>
-          </View>
-          <View style={styles.avatarContainer}>
-            <View style={styles.avatarPlaceholder}>
-              <SafeIcon set="Ionicons" name="person" size={18} color="#e5e7eb" />
+            <View>
+              <Text style={styles.logoText}>
+                <Text style={{ color: '#fff' }}>Vision</Text>
+                <Text style={{ color: '#d946ef' }}>Voice</Text>
+              </Text>
+              {currentWeather && (
+                <Text style={styles.weatherSubtext}>
+                  {currentWeather.temperature}°C • {currentWeather.description.split(',')[0]}
+                </Text>
+              )}
             </View>
           </View>
         </View>
 
-        <ScrollView
-          ref={scrollViewRef}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {messages.length === 0 && (
-            <View style={styles.center}>
-              <Text style={styles.aiText}>
-                {isListening ? 'Listening...' : 'Tap the mic to start talking to Clara.'}
-              </Text>
-            </View>
-          )}
-
-          {messages.map((msg) => {
-            const isUser = msg.sender === 'user';
-            return (
-              <View
-                key={msg.id}
-                style={[
-                  styles.messageContainer,
-                  isUser ? styles.userMessageContainer : styles.aiMessageContainer,
-                ]}
-              >
-                {!isUser && (
-                  <View style={styles.aiAvatar}>
-                    <LinearGradient
-                      colors={['#a855f7', '#db2777']}
-                      style={styles.avatarGradient}
-                    >
-                      <Icons.Ionicons name="sparkles" size={14} color="white" />
-                    </LinearGradient>
-                  </View>
-                )}
-                <View
-                  style={[
-                    styles.messageBubble,
-                    isUser ? styles.userBubble : styles.aiBubble,
-                  ]}
-                >
-                  {msg.imageUri && (
-                    <Image
-                      source={{ uri: msg.imageUri }}
-                      style={styles.capturedImage}
-                      resizeMode="cover"
-                    />
-                  )}
-                  <Text style={[styles.messageText, isUser ? styles.userText : styles.aiText]}>
-                    {msg.text}
-                  </Text>
-                  <Text style={styles.timestamp}>
-                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
-                </View>
+        <ScrollView ref={scrollViewRef} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {messages.map((msg) => (
+            <View key={msg.id} style={[styles.messageContainer, msg.sender === 'user' ? styles.userMessageContainer : styles.aiMessageContainer]}>
+              <View style={[styles.messageBubble, msg.sender === 'user' ? styles.userBubble : styles.aiBubble]}>
+                {msg.imageUri && <Image source={{ uri: msg.imageUri }} style={styles.capturedImage} resizeMode="cover" />}
+                <Text style={[styles.messageText, msg.sender === 'user' ? styles.userText : styles.aiText]}>{msg.text}</Text>
               </View>
-            );
-          })}
-
-          {/* Add bottom padding to allow scrolling past the fixed UI */}
+            </View>
+          ))}
           <View style={{ height: 280 }} />
         </ScrollView>
       </SafeAreaView>
 
-      {/* LISTENING UI & BOTTOM BAR (Overlay) */}
       <View style={[styles.fixedBottomContainer, { paddingBottom: bottomPadding }]}>
-        {/* WAVEFORM */}
         <View style={styles.listeningContainer}>
           <View style={styles.waveform}>
             {WAVE_HEIGHTS.map((h, i) => (
-              <LinearGradient
-                key={i}
-                colors={['#c084fc', '#db2777']}
-                style={[styles.waveBar, { height: (isGenerating || isListening) ? h * 0.85 * (Math.random() * 0.5 + 0.5) : 5 }]}
-              />
+              <LinearGradient key={i} colors={['#c084fc', '#db2777']} style={[styles.waveBar, { height: (isGenerating || isListening) ? h * 0.85 * (Math.random() * 0.5 + 0.5) : 5 }]} />
             ))}
           </View>
           <Text style={styles.listeningText}>
@@ -736,31 +556,18 @@ AI:`;
           </Text>
         </View>
 
-        {/* TAB BAR */}
         <View style={styles.bottomTabBar}>
-          <TouchableOpacity 
-            style={styles.tabIcon} 
-            onPress={() => navigation.navigate('Chat')}
-          >
+          <TouchableOpacity style={styles.tabIcon} onPress={() => navigation.navigate('Chat')}>
             <SafeIcon set="MaterialCommunityIcons" name="history" size={26} color="#94a3b8" />
           </TouchableOpacity>
-
-          {/* GLOWING MIC BUTTON */}
           <View style={styles.tabMicWrapper}>
             <View style={styles.micGlow} />
-            <TouchableOpacity 
-              activeOpacity={0.8} 
-              onPress={handleMicPress}
-            >
-              <LinearGradient
-                colors={isListening ? ['#ef4444', '#b91c1c'] : ['#a855f7', '#db2777']}
-                style={[styles.tabMicButton, isGenerating && { opacity: 0.5 }]}
-              >
+            <TouchableOpacity activeOpacity={0.8} onPress={handleMicPress}>
+              <LinearGradient colors={isListening ? ['#ef4444', '#b91c1c'] : ['#a855f7', '#db2777']} style={[styles.tabMicButton, isGenerating && { opacity: 0.5 }]}>
                 <SafeIcon set="Ionicons" name={isListening ? "stop" : "mic"} size={30} color="white" />
               </LinearGradient>
             </TouchableOpacity>
           </View>
-
           <TouchableOpacity style={styles.tabIcon} onPress={async () => {
             const profile = await getUserProfile();
             setSettingsLanguage(profile?.language || 'English');
@@ -771,40 +578,30 @@ AI:`;
         </View>
       </View>
 
-      {/* SETTINGS MODAL */}
       <Modal visible={isSettingsOpen} transparent animationType="slide">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Settings</Text>
-            <Text style={styles.modalSubtitle}>Preferred Language:</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="e.g. English, Spanish, Hindi"
-              placeholderTextColor="#94a3b8"
-              value={settingsLanguage}
-              onChangeText={setSettingsLanguage}
-            />
+            <TextInput style={styles.modalInput} value={settingsLanguage} onChangeText={setSettingsLanguage} placeholder="Language" placeholderTextColor="#94a3b8" />
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalButton} onPress={() => setIsSettingsOpen(false)}>
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.modalButtonPrimary]} 
-                onPress={async () => {
-                  const profile = await getUserProfile();
-                  if (!profile) {
-                    Alert.alert('Unable to save', 'No user profile was found. Please complete onboarding or recreate your profile before updating settings.');
-                    return;
-                  }
-
-                  await saveUserProfile({ ...profile, language: settingsLanguage || 'English' });
-                  await refreshTTSLanguage(settingsLanguage || 'English');
-                  Alert.alert('Success', 'Language updated!');
+              <TouchableOpacity onPress={() => setIsSettingsOpen(false)}><Text style={styles.modalButtonText}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButton, styles.modalButtonPrimary]} onPress={async () => {
+                const profile = await getUserProfile();
+                if (profile) {
+                  const safeLang = getSafePromptLanguageName(settingsLanguage);
+                  await saveUserProfile({ ...profile, language: safeLang });
+                  await refreshTTSLanguage(safeLang);
                   setIsSettingsOpen(false);
-                }}
-              >
-                <Text style={styles.modalButtonTextPrimary}>Save</Text>
-              </TouchableOpacity>
+                  setIsGenerating(true);
+                  const confirmationPrompt = `<start_of_turn>user\n${LANGUAGE_SWITCH_CONFIRMATION_PROMPT.replace(/{language}/g, safeLang)}<end_of_turn>\n<start_of_turn>model\n`;
+                  let msg = '';
+                  if (context) await context.completion({ prompt: confirmationPrompt, n_predict: 40, stop: ['<end_of_turn>', '<eos>'], temperature: 0.3 }, (res) => msg += res.token);
+                  const aiMsg: Message = { id: Date.now().toString(), text: msg.trim() || `Switched to ${safeLang}.`, sender: 'ai', timestamp: new Date() };
+                  setMessages(prev => [...prev, aiMsg]);
+                  setIsGenerating(false);
+                  speak(aiMsg.text);
+                }
+              }}><Text style={styles.modalButtonTextPrimary}>Save</Text></TouchableOpacity>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -814,236 +611,41 @@ AI:`;
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0f111a',
-  },
-  center: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 20,
-    marginTop: 10,
-  },
-  logoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  logoText: {
-    fontSize: 22,
-    fontWeight: 'bold',
-  },
-  avatarContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#1c1e2d',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  avatarPlaceholder: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#1f2937',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  messageContainer: {
-    flexDirection: 'row',
-    marginBottom: 16,
-    maxWidth: '90%',
-  },
-  userMessageContainer: {
-    alignSelf: 'flex-end',
-  },
-  aiMessageContainer: {
-    alignSelf: 'flex-start',
-  },
-  aiAvatar: {
-    marginRight: 8,
-    alignSelf: 'flex-end',
-    marginBottom: 4,
-  },
-  avatarGradient: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  messageBubble: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 20,
-  },
-  userBubble: {
-    backgroundColor: '#3b82f6',
-    borderBottomRightRadius: 4,
-  },
-  aiBubble: {
-    backgroundColor: '#1e293b',
-    borderBottomLeftRadius: 4,
-  },
-  capturedImage: {
-    width: '100%',
-    height: 180,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 24,
-  },
-  userText: {
-    color: '#fff',
-  },
-  aiText: {
-    color: '#e2e8f0',
-  },
-  timestamp: {
-    fontSize: 10,
-    color: 'rgba(255, 255, 255, 0.5)',
-    marginTop: 4,
-    alignSelf: 'flex-end',
-  },
-  fixedBottomContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#0f111a',
-    paddingTop: 8,
-  },
-  listeningContainer: {
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  waveform: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 60,
-    gap: 5,
-    marginBottom: 10,
-  },
-  waveBar: {
-    width: 5,
-    borderRadius: 3,
-  },
-  listeningText: {
-    color: '#94a3b8',
-    fontSize: 11,
-    letterSpacing: 2,
-    fontWeight: '600',
-    paddingHorizontal: 40,
-    textAlign: 'center',
-  },
-  bottomTabBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingBottom: 10,
-    paddingHorizontal: 20,
-  },
-  tabIcon: {
-    padding: 10,
-  },
-  tabMicWrapper: {
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  micGlow: {
-    position: 'absolute',
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#db2777',
-    opacity: 0.15,
-  },
-  tabMicButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#db2777',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 12,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    width: '100%',
-    backgroundColor: '#1c1e2d',
-    borderRadius: 16,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 16,
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: '#94a3b8',
-    marginBottom: 8,
-  },
-  modalInput: {
-    backgroundColor: '#0f111a',
-    borderWidth: 1,
-    borderColor: '#334155',
-    borderRadius: 8,
-    padding: 12,
-    color: '#fff',
-    fontSize: 16,
-    marginBottom: 24,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-  },
-  modalButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  modalButtonPrimary: {
-    backgroundColor: '#d946ef',
-  },
-  modalButtonText: {
-    color: '#94a3b8',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  modalButtonTextPrimary: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-  },
+  container: { flex: 1, backgroundColor: '#0f111a' },
+  center: { justifyContent: 'center', alignItems: 'center', padding: 20 },
+  safeArea: { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 10 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 20, marginTop: 10 },
+  logoContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  logoText: { fontSize: 22, fontWeight: 'bold' },
+  weatherSubtext: { color: '#94a3b8', fontSize: 10, fontWeight: '600', letterSpacing: 0.5 },
+  messageContainer: { flexDirection: 'row', marginBottom: 16, maxWidth: '90%' },
+  userMessageContainer: { alignSelf: 'flex-end' },
+  aiMessageContainer: { alignSelf: 'flex-start' },
+  messageBubble: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20 },
+  userBubble: { backgroundColor: '#3b82f6', borderBottomRightRadius: 4 },
+  aiBubble: { backgroundColor: '#1e293b', borderBottomLeftRadius: 4 },
+  capturedImage: { width: '100%', height: 180, borderRadius: 12, marginBottom: 8 },
+  messageText: { fontSize: 16, lineHeight: 24 },
+  userText: { color: '#fff' },
+  aiText: { color: '#e2e8f0' },
+  fixedBottomContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#0f111a', paddingTop: 8 },
+  listeningContainer: { alignItems: 'center', marginBottom: 14 },
+  waveform: { flexDirection: 'row', alignItems: 'center', height: 60, gap: 5, marginBottom: 10 },
+  waveBar: { width: 5, borderRadius: 3 },
+  listeningText: { color: '#94a3b8', fontSize: 11, letterSpacing: 2, fontWeight: '600', paddingHorizontal: 40, textAlign: 'center' },
+  bottomTabBar: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingBottom: 10, paddingHorizontal: 20 },
+  tabIcon: { padding: 10 },
+  tabMicWrapper: { position: 'relative', justifyContent: 'center', alignItems: 'center' },
+  micGlow: { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: '#db2777', opacity: 0.15 },
+  tabMicButton: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', elevation: 12 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { width: '100%', backgroundColor: '#1c1e2d', borderRadius: 16, padding: 24, borderWidth: 1, borderColor: '#334155' },
+  modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#fff', marginBottom: 16 },
+  modalInput: { backgroundColor: '#0f111a', borderWidth: 1, borderColor: '#334155', borderRadius: 8, padding: 12, color: '#fff', fontSize: 16, marginBottom: 24 },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  modalButton: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 },
+  modalButtonPrimary: { backgroundColor: '#d946ef' },
+  modalButtonText: { color: '#94a3b8', fontWeight: '600', fontSize: 16 },
+  modalButtonTextPrimary: { color: '#fff', fontWeight: '600', fontSize: 16 },
 });

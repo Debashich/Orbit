@@ -12,6 +12,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Icons from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSTT } from '../hooks/useSTT';
 
 const { width, height } = Dimensions.get('window');
 
@@ -45,6 +46,31 @@ export default function CameraScreen() {
 
   const command = route.params?.command || 'Capture image';
   const analysisPrompt = route.params?.analysisPrompt || 'Describe what you see in this image.';
+
+  const { startWakeWordDetection, stopListening } = useSTT();
+  const isWakeWordActive = useRef(false);
+
+  // Wake word detection for voice capture
+  useEffect(() => {
+    let isMounted = true;
+    
+    const runWakeWord = async () => {
+      if (!isCapturing && isMounted && !isWakeWordActive.current) {
+        isWakeWordActive.current = true;
+        await startWakeWordDetection(() => {
+          isWakeWordActive.current = false;
+          if (isMounted) handleCapture();
+        });
+      }
+    };
+
+    runWakeWord();
+
+    return () => {
+      isMounted = false;
+      stopListening();
+    };
+  }, [isCapturing]);
 
   // Auto-capture countdown
   useEffect(() => {

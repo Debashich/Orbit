@@ -4,9 +4,10 @@ import { startVoice, stopVoice, destroyVoice } from '../services/speech/stt';
 export const useSTT = () => {
   const [transcript, setTranscript] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [isWakeWordDetected, setIsWakeWordDetected] = useState(false);
   const isListeningRef = useRef(false);
 
-  const startListening = useCallback(async () => {
+  const startListening = useCallback(async (options: { continuous?: boolean } = {}) => {
     console.log('[Hook] 🎯 startListening called, isListeningRef:', isListeningRef.current);
     
     if (isListeningRef.current) {
@@ -28,7 +29,37 @@ export const useSTT = () => {
         console.log('[Hook] 🏁 onEnd callback triggered');
         setIsListening(false);
         isListeningRef.current = false;
-      }
+      },
+      options
+    );
+  }, []);
+
+  const startWakeWordDetection = useCallback(async (onDetected: () => void) => {
+    console.log('[Hook] 👂 Starting wake word detection...');
+    
+    if (isListeningRef.current) return;
+    
+    setIsWakeWordDetected(false);
+    isListeningRef.current = true;
+    
+    await startVoice(
+      (text) => {
+        const lower = text.toLowerCase();
+        // Support both Gemini and Clara as wake words
+        if (lower.includes('hey gemini') || lower.includes('gemini') || 
+            lower.includes('hey clara') || lower.includes('clara')) {
+          console.log('[Hook] 🔔 Wake word detected:', lower);
+          isListeningRef.current = false;
+          stopVoice();
+          setIsWakeWordDetected(true);
+          onDetected();
+        }
+      },
+      () => {
+        console.log('[Hook] 🏁 Wake word detection session ended');
+        isListeningRef.current = false;
+      },
+      { continuous: true, interimResults: true }
     );
   }, []);
 
@@ -37,6 +68,7 @@ export const useSTT = () => {
     await stopVoice();
     setIsListening(false);
     isListeningRef.current = false;
+    setIsWakeWordDetected(false);
   }, []);
 
   useEffect(() => {
@@ -49,7 +81,9 @@ export const useSTT = () => {
   return {
     transcript,
     isListening,
+    isWakeWordDetected,
     startListening,
     stopListening,
+    startWakeWordDetection,
   };
 };

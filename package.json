@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "eslint-plugin-unused-imports": "^4.4.1",
     "expo-module-scripts": "^55.0.2",
     "typescript": "~5.9.2"
   },
