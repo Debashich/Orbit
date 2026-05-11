@@ -52,9 +52,8 @@ export const useSTT = () => {
     await startVoice(
       (text) => {
         const lower = text.toLowerCase();
-        // Support both Gemini and Clara as wake words
-        if (lower.includes('hey gemini') || lower.includes('gemini') || 
-            lower.includes('hey clara') || lower.includes('clara')) {
+        // Support Orbit as wake word
+        if (lower.includes('hey orbit') || lower.includes('orbit')) {
           console.log('[Hook] 🔔 Wake word detected:', lower);
           isListeningRef.current = false;
           stopVoice();

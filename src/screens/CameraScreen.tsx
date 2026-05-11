@@ -158,7 +158,7 @@ export default function CameraScreen() {
           <SafeIcon set="Ionicons" name="camera-outline" size={64} color="#d946ef" />
           <Text style={styles.permissionTitle}>Camera Access Needed</Text>
           <Text style={styles.permissionDesc}>
-            Clara needs camera access to capture and analyze images for you.
+            Orbit needs camera access to capture and analyze images for you.
           </Text>
           <TouchableOpacity activeOpacity={0.8} onPress={requestPermission}>
             <LinearGradient

@@ -36,11 +36,11 @@ const SafeIcon = ({ set, name, size, color }: any) => {
 const QUESTIONS = [
     {
         title: "How would you describe your vision?",
-        subtitle: "This helps Clara understand your perspective.",
+        subtitle: "This helps Orbit understand your perspective.",
         placeholder: "e.g. Totally blind, low vision",
     },
     {
-        title: "Which language do you prefer Clara to speak in?",
+        title: "Which language do you prefer Orbit to speak in?",
         subtitle: "Select your primary language for interaction.",
         placeholder: "e.g. English, Hindi, Spanish",
     },
@@ -51,11 +51,11 @@ const QUESTIONS = [
     },
     {
         title: "What tasks do you need the most help with?",
-        subtitle: "Clara will prioritize these assistances.",
+        subtitle: "Orbit will prioritize these assistances.",
         placeholder: "e.g. Reading, walking, finding objects",
     },
     {
-        title: "How do you like Clara to respond?",
+        title: "How do you like Orbit to respond?",
         subtitle: "Choose the tone and detail of responses.",
         placeholder: "e.g. Concise, descriptive, friendly",
     },
@@ -129,7 +129,7 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
     useEffect(() => {
         if (!isInitialized) return;
         console.log('[Screen] 🎤 Speaking welcome message...');
-        const welcomeMsg = 'Welcome to Clara. I will ask you a few questions to get started. You can say, Hey Gemini, go next, at any time to move forward after answering.';
+        const welcomeMsg = 'Welcome to Orbit. I will ask you a few questions to get started. You can say, Hey Orbit, go next, at any time to move forward after answering.';
         speak(welcomeMsg);
         return () => {
             stop();
@@ -147,8 +147,15 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
     useEffect(() => {
         if (transcript.trim()) {
             const lower = transcript.toLowerCase();
+            // Improved voice command detection: check for keywords
             if (lower.includes('go next') || lower.includes('continue') || lower.includes('next question')) {
-                handleNext();
+                console.log('[Onboarding] 🚀 Voice command detected: next');
+                // Stop listener immediately to prevent transcript from leaking into next question
+                stopListening();
+                // Short delay to ensure state updates
+                setTimeout(() => {
+                    handleNext();
+                }, 100);
             } else {
                 updateAnswer(transcript);
             }
@@ -241,8 +248,8 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
                     <View style={styles.logoContainer}>
                         <SafeIcon set="Ionicons" name="eye" size={28} color="#d946ef" />
                         <Text style={styles.logoText}>
-                            <Text style={{ color: '#fff' }}>Vision</Text>
-                            <Text style={{ color: '#d946ef' }}>Voice</Text>
+                            <Text style={{ color: '#fff' }}>Orbit</Text>
+                            <Text style={{ color: '#d946ef' }}>AI</Text>
                         </Text>
                     </View>
                     <TouchableOpacity onPress={() => navigation.navigate('Download')}>

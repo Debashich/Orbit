@@ -19,7 +19,7 @@ export const checkMicrophonePermission = async () => {
         PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
         {
           title: 'Microphone Permission',
-          message: 'Clara needs access to your microphone so you can talk to her.',
+          message: 'Orbit needs access to your microphone so you can talk to her.',
           buttonNeutral: 'Ask Me Later',
           buttonNegative: 'Cancel',
           buttonPositive: 'OK',

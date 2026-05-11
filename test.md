@@ -38,7 +38,7 @@ src/
 
 ## 🎯 Goal
 
-Clara speaks reliably
+Orbit speaks reliably
 
 ---
 
@@ -121,7 +121,7 @@ const { speak, stop } = useTTS();
 
 ```ts
 useEffect(() => {
-  speak('Clara is ready');
+  speak('Orbit is ready');
 }, []);
 ```
 

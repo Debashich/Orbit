@@ -48,14 +48,14 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
   useEffect(() => {
     downloadStateRef.current = downloadState;
     if (downloadState === 'completed') {
-      speak("Download complete! Your local intelligence is ready. Say, Hey Gemini, continue, to enter the app.");
+      speak("Download complete! Your local intelligence is ready. Say, Hey Orbit, continue, to enter the app.");
     }
   }, [downloadState]);
 
   // Read aloud on enter
   useEffect(() => {
-    const reasoning = "Clara needs to download her intelligence files to work offline. This ensures your privacy as no data will ever leave your device. The download is about 1.6 gigabytes.";
-    speak(`Download Screen. ${reasoning}. Say, Hey Gemini, start download, to begin.`);
+    const reasoning = "Orbit needs to download its intelligence files to work offline. This ensures your privacy as no data will ever leave your device. The download is about 1.6 gigabytes.";
+    speak(`Download Screen. ${reasoning}. Say, Hey Orbit, start download, to begin.`);
     
     return () => {
       stop();
@@ -258,8 +258,8 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
             <View style={styles.logoContainer}>
               <SafeIcon set="Ionicons" name="eye" size={24} color="#d946ef" />
               <Text style={styles.logoText}>
-                <Text style={{ color: '#fff' }}>Vision</Text>
-                <Text style={{ color: '#d946ef' }}>Voice</Text>
+                <Text style={{ color: '#fff' }}>Orbit</Text>
+                <Text style={{ color: '#d946ef' }}>AI</Text>
               </Text>
             </View>
           </View>

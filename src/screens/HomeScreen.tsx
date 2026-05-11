@@ -22,7 +22,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { initLlama, LlamaContext } from 'llama.rn';
 import RNFS from 'react-native-fs';
 import { 
-  CLARA_MOBILITY_PROTOCOL, 
+  ORBIT_MOBILITY_PROTOCOL, 
   ASSISTIVE_DESCRIPTION_PROTOCOL, 
   GENERAL_ASSISTANT_PROTOCOL, 
   INTENT_CLASSIFICATION_PROMPT, 
@@ -236,12 +236,12 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         setMessages([
           {
             id: '1',
-            text: `Hello! I am Clara. How can I help you today?`,
+            text: `Hello! I am Orbit. How can I help you today?`,
             sender: 'ai',
             timestamp: new Date(),
           },
         ]);
-        speak(`Hello! I am Clara. How can I help you today?`);
+        speak(`Hello! I am Orbit. How can I help you today?`);
       } catch (error) {
         console.error('Initialization error:', error);
         setIsInitializing(false);
@@ -420,7 +420,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       const languageInstruction = `\nCRITICAL: Respond in ${langName} using its native script and alphabet. NO Latin letters.`;
       
       let activeProtocol = GENERAL_ASSISTANT_PROTOCOL;
-      if (currentIntent === 'VISION_REQUIRED') activeProtocol = CLARA_MOBILITY_PROTOCOL;
+      if (currentIntent === 'VISION_REQUIRED') activeProtocol = ORBIT_MOBILITY_PROTOCOL;
       else if (currentIntent === 'VISION_OPTIONAL') activeProtocol = ASSISTIVE_DESCRIPTION_PROTOCOL;
 
       let fullResponse = '';
@@ -468,7 +468,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       const currentLoc = await getCurrentLocation();
       const sensorContext = getSensorContext(currentLoc);
       const languageInstruction = `\nCRITICAL: Respond in ${langName} using its native script.`;
-      const activeProtocol = intent === 'VISION_REQUIRED' ? CLARA_MOBILITY_PROTOCOL : ASSISTIVE_DESCRIPTION_PROTOCOL;
+      const activeProtocol = intent === 'VISION_REQUIRED' ? ORBIT_MOBILITY_PROTOCOL : ASSISTIVE_DESCRIPTION_PROTOCOL;
 
       let attempt = 1;
       const maxAttempts = 2;
@@ -519,8 +519,8 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
             <SafeIcon set="Ionicons" name="eye" size={24} color="#d946ef" />
             <View>
               <Text style={styles.logoText}>
-                <Text style={{ color: '#fff' }}>Vision</Text>
-                <Text style={{ color: '#d946ef' }}>Voice</Text>
+                <Text style={{ color: '#fff' }}>Orbit</Text>
+                <Text style={{ color: '#d946ef' }}>AI</Text>
               </Text>
               {currentWeather && (
                 <Text style={styles.weatherSubtext}>
@@ -552,7 +552,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
             ))}
           </View>
           <Text style={styles.listeningText}>
-            {isAnalyzingImage ? 'ANALYZING IMAGE...' : isGenerating ? 'CLARA IS THINKING...' : (transcript || 'Say something...')}
+            {isAnalyzingImage ? 'ANALYZING IMAGE...' : isGenerating ? 'ORBIT IS THINKING...' : (transcript || 'Say something...')}
           </Text>
         </View>
 

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "VisionVoice",
-    "slug": "VisionVoice",
+    "name": "Orbit",
+    "slug": "Orbit",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.VisionVoice"
+      "bundleIdentifier": "com.anonymous.Orbit"
     },
     "android": {
       "adaptiveIcon": {
@@ -32,7 +32,7 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.CAMERA"
       ],
-      "package": "com.anonymous.VisionVoice"
+      "package": "com.anonymous.Orbit"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -45,7 +45,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Clara to access your camera for image capture and analysis."
+          "cameraPermission": "Allow Orbit to access your camera for image capture and analysis."
         }
       ]
     ]
