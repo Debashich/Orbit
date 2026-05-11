@@ -38,7 +38,7 @@ export default function CameraScreen() {
   const [countdown, setCountdown] = useState(AUTO_CAPTURE_DELAY);
   const [isCapturing, setIsCapturing] = useState(false);
   const [hasAutoCaptured, setHasAutoCaptured] = useState(false);
-  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const handleCaptureRef = useRef<() => void>(() => {});
   const insets = useSafeAreaInsets();
   const topPadding = insets.top > 0 ? insets.top : 24;
