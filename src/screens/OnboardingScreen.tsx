@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
     View,
     Text,
@@ -67,11 +67,12 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
     const hookNavigation = useNavigation<any>();
     const navigation = propNavigation || hookNavigation;
     const { speak, stop } = useTTS();
-    const { transcript, isListening, startListening, stopListening } = useSTT();
+    const { transcript, isListening, startListening, stopListening, startWakeWordDetection } = useSTT();
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState(['', '', '', '', '']);
     const [isSaving, setIsSaving] = useState(false);
     const [isInitialized, setIsInitialized] = useState(false);
+    const isWakeWordActive = useRef(false);
     const insets = useSafeAreaInsets();
     const bottomPadding = insets.bottom > 0 ? insets.bottom : 12;
 
@@ -83,12 +84,41 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
             setIsInitialized(true);
         };
         init();
+
+        return () => {
+            stop();
+            stopListening();
+        };
     }, []);
+
+    // Wake word detection loop
+    useEffect(() => {
+        let isMounted = true;
+        
+        const runWakeWord = async () => {
+            if (isInitialized && !isListening && isMounted && !isWakeWordActive.current && !isSaving) {
+                isWakeWordActive.current = true;
+                await startWakeWordDetection(() => {
+                    isWakeWordActive.current = false;
+                    if (isMounted) {
+                        speak("I'm listening", () => {
+                            setTimeout(() => {
+                                startListening();
+                            }, 50);
+                        });
+                    }
+                });
+            }
+        };
+
+        runWakeWord();
+        return () => { isMounted = false; };
+    }, [isListening, isInitialized, isSaving]);
 
     useEffect(() => {
         if (!isInitialized) return;
         console.log('[Screen] 🎤 Speaking welcome message...');
-        const welcomeMsg = 'Welcome to Clara';
+        const welcomeMsg = 'Welcome to Clara. I will ask you a few questions to get started. You can say, Hey Gemini, go next, at any time to move forward after answering.';
         speak(welcomeMsg);
         return () => {
             stop();
@@ -105,7 +135,12 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
 
     useEffect(() => {
         if (transcript.trim()) {
-            updateAnswer(transcript);
+            const lower = transcript.toLowerCase();
+            if (lower.includes('go next') || lower.includes('continue') || lower.includes('next question')) {
+                handleNext();
+            } else {
+                updateAnswer(transcript);
+            }
         }
     }, [transcript]);
 
@@ -129,7 +164,9 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
     const handleNext = async () => {
         // Validate: don't allow empty answers
         if (!answers[currentStep].trim()) {
-            Alert.alert('Required', 'Please enter an answer before continuing.', [{ text: 'OK' }]);
+            const errorMsg = "Please provide an answer before moving to the next question.";
+            speak(errorMsg);
+            Alert.alert('Required', errorMsg, [{ text: 'OK' }]);
             return;
         }
 

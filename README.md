@@ -2,34 +2,37 @@
 
 Clara (VisionVoice) is an AI-powered assistant designed to support blind and visually impaired individuals through real-time audio guidance and vision-to-speech insights. The project leverages on-device LLMs to ensure 100% privacy and offline functionality.
 
-## Current Status: Intelligent Proactive Mobility Guide
+## Latest Features: Hands-Free Voice Control & Intelligence
 
-Clara has evolved into a **proactive mobility assistant** with deep situational awareness. The system now integrates phone sensors (GPS, Compass, Accelerometer) with vision and voice to provide fast, safety-critical navigation instructions.
+Clara now features a unified **"Hey Gemini"** wake word detection system across all screens, enabling a completely hands-free experience from onboarding to daily use.
 
-### Core Features Implemented
+### Core Enhancements
 
-- **Sensor Fusion & Situational Awareness** *(New)*:
-    *   **Motion-Aware Decisions**: Clara intelligently distinguishes between user states. She will say **"Wait"** if you are already stopped at a hazard, or **"Stop"** if you are walking towards one.
-    *   **Directional Guidance**: Uses real-time heading (compass) data to provide refined actions like **"Move right"** or **"Slightly left"** instead of generic instructions.
-    *   **Sound Priority**: Integrated audio context overrides visual data—if a vehicle is heard approaching from the side, Clara prioritizes an immediate safety warning.
+- **Global "Hey Gemini" Wake Word** *(New)*:
+    - **Always-Listening**: Background wake word detection is active on Home, Camera, Onboarding, and Download screens.
+    - **Contextual Commands**:
+        - **Onboarding**: Say *"Hey Gemini, go next"* to navigate through setup.
+        - **Download**: Say *"Hey Gemini, start download"* to begin the initialization or *"Hey Gemini, continue"* once finished.
+        - **Camera**: Say *"Hey Gemini"* to trigger an instant image analysis.
+        - **Home**: Use it to wake Clara for questions or vision assistance.
 
-- **"Zero-Delay" Intent Engine** *(New)*:
-    *   **High-Speed Heuristics**: A regex-based classification layer identifies 90% of commands (Safety, Description, Language) **instantly**, bypassing LLM inference delays for common tasks.
-    *   **Pass-Through Pipeline**: Intent is classified once at the voice stage and passed directly to the vision engine, eliminating redundant processing and saving ~10 seconds per interaction.
+- **Intelligent Onboarding & Navigation** *(New)*:
+    - **Voice Navigation**: Complete the entire setup process using only your voice.
+    - **Error Feedback**: Clara now reads validation errors aloud (e.g., if a question is skipped without an answer).
+    - **Faster Interaction**: Optimized STT-to-TTS handoffs for a more natural conversational flow.
 
-- **Layered Priority Protocols** *(New)*:
-    *   **Priority 1: Mobility Guidance**: Triggered for safety-critical queries. Enforces a strict `<hazard> <location>. <action>.` format.
-    *   **Priority 2: Assistive Description**: Triggered for detail-oriented queries ("What is this?"). Preserves rich spatial feedback, including estimated distances and object names.
-    *   **Priority 3: General Chat**: Warm, concise conversational assistance.
-    *   **Safety Overrides**: Even during descriptive requests, Clara will ignore curiosity and prioritize safety if an immediate hazard is detected.
+- **Dynamic Weather Integration** *(New)*:
+    - **Open-Meteo Integration**: Real-time weather data fetching based on precise location coordinates.
+    - **Visual Widget**: At-a-glance weather info in the header.
+    - **Contextual Awareness**: Clara incorporates current weather conditions into her conversational responses.
 
-- **Smart Conversation Memory** *(New)*:
-    *   **Follow-up Handling**: Intelligently handles queries like **"What about now?"** or **"Again"** by assuming the previous visual context and re-triggering the camera instantly.
-    *   **Proactive Clarification**: If a user request is ambiguous (e.g., "Check"), Clara proactively asks, **"Do you want me to look?"** instead of guessing.
+- **Sensor Fusion & Situational Awareness**:
+    - **Motion-Aware Decisions**: Clara distinguishes between "Wait" (stopped) and "Stop" (moving) based on GPS/Accelerometer data.
+    - **Directional Guidance**: Uses real-time heading (compass) data for refined actions like "Move right" or "Slightly left".
 
-- **Universal Multi-Lingual Support**:
-    *   **Native Script Enforcement**: Responses use the native alphabet of the target language (e.g., Devanagari for Hindi).
-    *   **Multi-Language Safety**: Heuristic layer supports safety keywords in English, Hindi, and other major languages for zero-delay triggers globally.
+### Current Status: Intelligent Proactive Mobility Guide
+
+Clara has evolved into a **proactive mobility assistant** with deep situational awareness. The system now integrates phone sensors with vision and voice to provide fast, safety-critical navigation instructions.
 
 ### The Assistive Intelligence Loop
 

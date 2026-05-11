@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,8 @@ import { useNavigation } from '@react-navigation/native';
 import * as Icons from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import RNFS from 'react-native-fs';
+import { useTTS } from '../hooks/useTTS';
+import { useSTT } from '../hooks/useSTT';
 
 const { width } = Dimensions.get('window');
 
@@ -31,13 +33,74 @@ const SafeIcon = ({ set, name, size, color }: any) => {
 export default function DownloadScreen({ navigation: propNavigation }: any) {
   const hookNavigation = useNavigation<any>();
   const navigation = propNavigation || hookNavigation;
+  const { speak, stop } = useTTS();
+  const { transcript, startWakeWordDetection, stopListening, isListening, startListening } = useSTT();
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'completed' | 'error'>('idle');
+  const downloadStateRef = useRef(downloadState);
   const [progress, setProgress] = useState(0);
   const [downloadedMB, setDownloadedMB] = useState(0);
   const [totalMB, setTotalMB] = useState(4446);
   const [downloadPhase, setDownloadPhase] = useState<'model' | 'mmproj'>('model');
+  const isWakeWordActive = useRef(false);
   const insets = useSafeAreaInsets();
   const bottomPadding = insets.bottom > 0 ? insets.bottom : 12;
+
+  useEffect(() => {
+    downloadStateRef.current = downloadState;
+    if (downloadState === 'completed') {
+      speak("Download complete! Your local intelligence is ready. Say, Hey Gemini, continue, to enter the app.");
+    }
+  }, [downloadState]);
+
+  // Read aloud on enter
+  useEffect(() => {
+    const reasoning = "Clara needs to download her intelligence files to work offline. This ensures your privacy as no data will ever leave your device. The download is about 1.6 gigabytes.";
+    speak(`Download Screen. ${reasoning}. Say, Hey Gemini, start download, to begin.`);
+    
+    return () => {
+      stop();
+      stopListening();
+    };
+  }, []);
+
+  // Handle voice commands from transcript
+  useEffect(() => {
+    if (transcript) {
+      const lower = transcript.toLowerCase();
+      if (lower.includes('start download') || lower.includes('begin') || lower.includes('download')) {
+        if (downloadStateRef.current !== 'downloading' && downloadStateRef.current !== 'completed') {
+          startDownload();
+        }
+      } else if (lower.includes('continue') || lower.includes('go to home') || lower.includes('finish')) {
+        if (downloadStateRef.current === 'completed') {
+          navigation.navigate('Home');
+        }
+      }
+    }
+  }, [transcript]);
+
+  // Wake word detection loop
+  useEffect(() => {
+    let isMounted = true;
+    const runWakeWord = async () => {
+      if (!isListening && isMounted && !isWakeWordActive.current && downloadStateRef.current !== 'downloading') {
+        isWakeWordActive.current = true;
+        await startWakeWordDetection(() => {
+          isWakeWordActive.current = false;
+          if (isMounted) {
+            speak("How can I help?", () => {
+              setTimeout(() => {
+                startListening();
+              }, 100);
+            });
+          }
+        });
+      }
+    };
+
+    runWakeWord();
+    return () => { isMounted = false; };
+  }, [isListening, downloadState]);
 
   useEffect(() => {
     // Check if already downloaded (both model and mmproj)
