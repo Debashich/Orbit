@@ -41,7 +41,7 @@ export const useSTT = () => {
     );
   }, [isListening]);
 
-  const startWakeWordDetection = useCallback(async (onDetected: () => void, onEnded?: () => void) => {
+  const startWakeWordDetection = useCallback(async (onDetected: (transcript?: string) => void, onEnded?: () => void) => {
     console.log('[Hook] 👂 Starting wake word detection...');
     
     if (isListeningRef.current) return;
@@ -52,13 +52,27 @@ export const useSTT = () => {
     await startVoice(
       (text) => {
         const lower = text.toLowerCase();
-        // Support Orbit as wake word
-        if (lower.includes('hey orbit') || lower.includes('orbit')) {
+        // Expanded wake word variants for "Orbit"
+        // Includes common misrecognitions (Orbed, Audit, Corbett, etc.) 
+        // and Hindi transliterations (ऑर्बिट)
+        const orbitVariants = [
+          'hey orbit', 'orbit', 'hey orbed', 'orbed', 
+          'hey audit', 'audit', 'hey corbett', 'corbett',
+          'hey order', 'order', 'hey orb', 'orb',
+          'hey corporate', 'corporate', 'hey carpet', 'carpet',
+          'हे ऑर्बिट', 'ऑर्बिट', 'ओर्बिट', 'हे ओर्बिट',
+          'heyorbit', 'hey-orbit'
+        ];
+        
+        const detected = orbitVariants.some(variant => lower.includes(variant));
+        
+        if (detected) {
           console.log('[Hook] 🔔 Wake word detected:', lower);
+          setTranscript(lower);
           isListeningRef.current = false;
           stopVoice();
           setIsWakeWordDetected(true);
-          onDetected();
+          onDetected(lower);
         }
       },
       () => {

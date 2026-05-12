@@ -5,6 +5,7 @@ export interface WeatherData {
   description: string;
   windSpeed: number;
   humidity: number;
+  weatherCode: number;
 }
 
 export const getWeatherData = async (lat: number, lon: number): Promise<WeatherData | null> => {
@@ -20,12 +21,15 @@ export const getWeatherData = async (lat: number, lon: number): Promise<WeatherD
       // Map WMO weather codes to simple descriptions
       // https://open-meteo.com/en/docs
       const getCondition = (code: number) => {
-        if (code === 0) return 'Clear';
-        if (code <= 3) return 'Partly Cloudy';
+        if (code === 0) return 'Clear sky';
+        if (code === 1) return 'Mainly clear';
+        if (code === 2) return 'Partly cloudy';
+        if (code === 3) return 'Overcast';
         if (code <= 48) return 'Foggy';
+        if (code <= 55) return 'Drizzle';
         if (code <= 67) return 'Rainy';
         if (code <= 77) return 'Snowy';
-        if (code <= 82) return 'Rain Showers';
+        if (code <= 82) return 'Rain showers';
         if (code <= 99) return 'Thunderstorm';
         return 'Cloudy';
       };
@@ -35,6 +39,7 @@ export const getWeatherData = async (lat: number, lon: number): Promise<WeatherD
         description: getCondition(current.weather_code),
         windSpeed: current.wind_speed_10m,
         humidity: current.relative_humidity_2m,
+        weatherCode: current.weather_code,
       };
     }
     return null;

@@ -7,8 +7,6 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
-  Modal,
-  TextInput,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -85,15 +83,28 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
 
   // Wake word detection loop
   useEffect(() => {
-    let timeout: NodeJS.Timeout;
+    let timeout: ReturnType<typeof setTimeout>;
     
     const runWakeWord = async () => {
       if (!isListening && !isGenerating && !isInitializing && !isWakeWordActive.current) {
         isWakeWordActive.current = true;
         console.log('[Home] 👂 Starting background wake word detection...');
-        await startWakeWordDetection(() => {
+        await startWakeWordDetection((fullTranscript) => {
           isWakeWordActive.current = false;
-          handleMicPress(); // Trigger active listening
+          
+          // Check if there is a command following the wake word
+          if (fullTranscript) {
+             const lower = fullTranscript.toLowerCase();
+             // Simple check if it's just the wake word or has more
+             const words = lower.trim().split(/\s+/);
+             if (words.length > 2) {
+                // Potential command included, skip the "Go ahead" prompt
+                // Just let the useEffect for transcript handle it
+                return;
+             }
+          }
+
+          handleMicPress(); // Trigger active listening with "Go ahead"
         });
       }
     };
@@ -119,8 +130,6 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   const [lastIntent, setLastIntent] = useState<Intent | null>(null);
   const lastProcessedTranscript = useRef<string>('');
 
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsLanguage, setSettingsLanguage] = useState('');
   const [currentWeather, setCurrentWeather] = useState<any>(null);
 
   const getSensorContext = (loc: LocationData | null) => {
@@ -404,7 +413,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
           console.log('[Home] ☁️ Fetching weather data...');
           const weatherData = await getWeatherData(currentLoc.latitude, currentLoc.longitude);
           if (weatherData) {
-            weatherInfo = `Current Weather: ${weatherData.temperature}°C, ${weatherData.description}, Humidity: ${weatherData.humidity}%. `;
+            weatherInfo = `CRITICAL WEATHER DATA: ${weatherData.temperature}°C, ${weatherData.description} (Code: ${weatherData.weatherCode}), Humidity: ${weatherData.humidity}%. Use this data ONLY for weather reports. `;
           }
         }
       }
@@ -556,9 +565,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         </View>
 
         <View style={styles.bottomTabBar}>
-          <TouchableOpacity style={styles.tabIcon} onPress={() => navigation.navigate('Chat')}>
-            <SafeIcon set="MaterialCommunityIcons" name="history" size={26} color="#94a3b8" />
-          </TouchableOpacity>
+          <View style={styles.tabIcon} /> 
           <View style={styles.tabMicWrapper}>
             <View style={styles.micGlow} />
             <TouchableOpacity activeOpacity={0.8} onPress={handleMicPress}>
@@ -567,44 +574,11 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
               </LinearGradient>
             </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.tabIcon} onPress={async () => {
-            const profile = await getUserProfile();
-            setSettingsLanguage(profile?.language || 'English');
-            setIsSettingsOpen(true);
-          }}>
+          <TouchableOpacity style={styles.tabIcon} onPress={() => navigation.navigate('Settings')}>
             <SafeIcon set="Ionicons" name="settings-sharp" size={24} color="#94a3b8" />
           </TouchableOpacity>
         </View>
       </View>
-
-      <Modal visible={isSettingsOpen} transparent animationType="slide">
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Settings</Text>
-            <TextInput style={styles.modalInput} value={settingsLanguage} onChangeText={setSettingsLanguage} placeholder="Language" placeholderTextColor="#94a3b8" />
-            <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setIsSettingsOpen(false)}><Text style={styles.modalButtonText}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.modalButtonPrimary]} onPress={async () => {
-                const profile = await getUserProfile();
-                if (profile) {
-                  const safeLang = getSafePromptLanguageName(settingsLanguage);
-                  await saveUserProfile({ ...profile, language: safeLang });
-                  await refreshTTSLanguage(safeLang);
-                  setIsSettingsOpen(false);
-                  setIsGenerating(true);
-                  const confirmationPrompt = `<start_of_turn>user\n${LANGUAGE_SWITCH_CONFIRMATION_PROMPT.replace(/{language}/g, safeLang)}<end_of_turn>\n<start_of_turn>model\n`;
-                  let msg = '';
-                  if (context) await context.completion({ prompt: confirmationPrompt, n_predict: 40, stop: ['<end_of_turn>', '<eos>'], temperature: 0.3 }, (res) => msg += res.token);
-                  const aiMsg: Message = { id: Date.now().toString(), text: msg.trim() || `Switched to ${safeLang}.`, sender: 'ai', timestamp: new Date() };
-                  setMessages(prev => [...prev, aiMsg]);
-                  setIsGenerating(false);
-                  speak(aiMsg.text);
-                }
-              }}><Text style={styles.modalButtonTextPrimary}>Save</Text></TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </View>
   );
 }
@@ -638,13 +612,4 @@ const styles = StyleSheet.create({
   tabMicWrapper: { position: 'relative', justifyContent: 'center', alignItems: 'center' },
   micGlow: { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: '#db2777', opacity: 0.15 },
   tabMicButton: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', elevation: 12 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '100%', backgroundColor: '#1c1e2d', borderRadius: 16, padding: 24, borderWidth: 1, borderColor: '#334155' },
-  modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#fff', marginBottom: 16 },
-  modalInput: { backgroundColor: '#0f111a', borderWidth: 1, borderColor: '#334155', borderRadius: 8, padding: 12, color: '#fff', fontSize: 16, marginBottom: 24 },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
-  modalButton: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 },
-  modalButtonPrimary: { backgroundColor: '#d946ef' },
-  modalButtonText: { color: '#94a3b8', fontWeight: '600', fontSize: 16 },
-  modalButtonTextPrimary: { color: '#fff', fontWeight: '600', fontSize: 16 },
 });

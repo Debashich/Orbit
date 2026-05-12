@@ -61,10 +61,12 @@ export const initializeTTS = async () => {
 };
 
 export const stopSpeech = () => {
-  if (isSpeaking) {
-    isSpeaking = false;
+  try {
     Speech.stop();
-    console.log('[TTS] ⏹️ Speech stopped');
+    isSpeaking = false;
+    console.log('[TTS] ⏹️ Speech stop requested');
+  } catch (err) {
+    console.error('[TTS] ❌ Stop error:', err);
   }
 };
 
@@ -75,10 +77,14 @@ export const speakText = async (text: string, onDone?: () => void) => {
     return;
   }
 
+  // Ensure any previous speech is stopped first
+  try {
+    await Speech.stop();
+  } catch (e) {}
+  
   await refreshTTSLanguage();
   const langCode = cachedLanguageCode || 'en-US';
 
-  stopSpeech();
   isSpeaking = true;
 
   const speakOptions: any = {
@@ -87,25 +93,21 @@ export const speakText = async (text: string, onDone?: () => void) => {
     onDone: () => {
       isSpeaking = false;
       console.log('[TTS] ✅ Speech completed');
-      onDone?.();
+      if (onDone) onDone();
     },
     onError: (error: any) => {
       isSpeaking = false;
       console.error('[TTS] ❌ Error:', error);
-      onDone?.();
+      if (onDone) onDone();
     },
     onStart: () => {
       console.log('[TTS] 🔊 Speech started:', text.substring(0, 50));
-      console.log('[TTS] 🔊 Config:', VOICE_CONFIG);
       try {
         Vibration.vibrate([100, 50, 100]);
-      } catch (e) {
-        console.log('[TTS] Vibration not available');
-      }
+      } catch (e) {}
     },
   };
 
   console.log('[TTS] 📢 SPEAKING NOW:', text);
-  console.log('[TTS] 📢 Options:', speakOptions);
   Speech.speak(text, speakOptions);
 };

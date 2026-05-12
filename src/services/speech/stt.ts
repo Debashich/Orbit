@@ -1,10 +1,18 @@
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
-import { PermissionsAndroid, Platform } from "react-native";
+import { PermissionsAndroid, Platform, AppState } from "react-native";
 import { getUserProfile } from "../../../database/db";
 import { getLanguageCode } from "../../constants/languages";
 
 let activeListeners: Array<{ remove: () => void }> = [];
 let isListeningNow = false;
+
+// Handle app state changes to turn off mic
+AppState.addEventListener('change', (nextAppState) => {
+  if (nextAppState !== 'active') {
+    console.log('[STT] 📱 App backgrounded/closed, ensuring mic is OFF');
+    destroyVoice();
+  }
+});
 
 const clearListeners = () => {
   activeListeners.forEach((listener) => listener.remove());
@@ -46,12 +54,11 @@ export const startVoice = async (
   try {
     console.log(`[STT] 📢 Starting voice recognition (continuous: ${!!options.continuous})...`);
     
-    if (isListeningNow) {
-      console.log('[STT] ⚠️ Already listening, ending duplicate start request');
-      onEnd();
-      return;
-    }
-
+    // Safety: Abort any existing session before starting a new one
+    try {
+      await ExpoSpeechRecognitionModule.abort();
+    } catch (e) {}
+    
     clearListeners();
     isListeningNow = true;
 
@@ -65,26 +72,21 @@ export const startVoice = async (
     }
     
     if (!hasPermission) {
-      console.warn('[STT] ❌ Microphone permission DENIED. User must grant permission in Android Settings.');
+      console.warn('[STT] ❌ Microphone permission DENIED.');
       isListeningNow = false;
       onEnd();
       return;
     }
 
-    console.log('[STT] ✅ Permission GRANTED! Setting up listeners...');
-
     const resultListener = ExpoSpeechRecognitionModule.addListener('result', (event) => {
-      console.log('[STT] 📝 Result event:', event);
       if (event.results && event.results[0]) {
         const transcript = event.results[0].transcript;
-        console.log('[STT] ✅ Transcript:', transcript);
         onResult(transcript);
       }
     });
 
     const errorListener = ExpoSpeechRecognitionModule.addListener('error', (event) => {
-      console.error('[STT] ❌ Error details:', JSON.stringify(event));
-      console.error('[STT] ❌ Error code:', event.error, 'Message:', event.message);
+      console.error('[STT] ❌ Error:', event.error, event.message);
       isListeningNow = false;
       clearListeners();
       onEnd();
@@ -98,18 +100,15 @@ export const startVoice = async (
     });
 
     activeListeners = [resultListener, errorListener, endListener];
-    console.log('[STT] ✅ Listeners registered');
 
     const profile = await getUserProfile();
     const langCode = getLanguageCode(profile?.language);
 
-    console.log(`[STT] 🚀 Calling module.start() with lang: ${langCode}`);
     ExpoSpeechRecognitionModule.start({
       lang: langCode,
       interimResults: options.interimResults ?? true,
       continuous: options.continuous ?? false,
     });
-    console.log('[STT] ✅ start() called successfully');
   } catch (err) {
     console.error('[STT] ❌ Start Error:', err);
     isListeningNow = false;

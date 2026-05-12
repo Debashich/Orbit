@@ -7,6 +7,7 @@ import OnboardingScreen from './src/screens/OnboardingScreen';
 import DownloadScreen from './src/screens/DownloadScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import CameraScreen from './src/screens/CameraScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 import { getUserProfile, initDatabase } from './database/db';
 
 function BootScreen() {
@@ -82,6 +83,10 @@ const RootStack = createNativeStackNavigator({
     Camera: {
       screen: CameraScreen,
       options: { headerShown: false, animation: 'slide_from_bottom' },
+    },
+    Settings: {
+      screen: SettingsScreen,
+      options: { headerShown: false, animation: 'slide_from_right' },
     },
   },
 });

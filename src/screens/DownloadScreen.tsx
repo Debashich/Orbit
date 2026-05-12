@@ -85,15 +85,30 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
     const runWakeWord = async () => {
       if (!isListening && isMounted && !isWakeWordActive.current && downloadStateRef.current !== 'downloading') {
         isWakeWordActive.current = true;
-        await startWakeWordDetection(() => {
+        await startWakeWordDetection((fullTranscript) => {
           isWakeWordActive.current = false;
-          if (isMounted) {
-            speak("How can I help?", () => {
-              setTimeout(() => {
-                startListening();
-              }, 100);
-            });
+          if (!isMounted) return;
+
+          // Check if command is already in the wake word transcript
+          const lower = fullTranscript?.toLowerCase() || '';
+          if (lower.includes('start download') || lower.includes('begin') || lower.includes('download')) {
+            if (downloadStateRef.current !== 'downloading' && downloadStateRef.current !== 'completed') {
+              startDownload();
+              return;
+            }
+          } else if (lower.includes('continue') || lower.includes('go to home') || lower.includes('finish')) {
+            if (downloadStateRef.current === 'completed') {
+              navigation.navigate('Home');
+              return;
+            }
           }
+
+          // Otherwise, speak and start active listening
+          speak("How can I help?", () => {
+            setTimeout(() => {
+              if (isMounted) startListening();
+            }, 100);
+          });
         });
       }
     };
