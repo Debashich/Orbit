@@ -266,7 +266,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
             timestamp: new Date(),
           },
         ]);
-        speak(`Hello! I am Orbit. How can I help you today?`, () => setWakeWordTrigger(prev => prev + 1));
+        speak(`Hello! I am Orbit. How can I help you today?`);
       } catch (error) {
         console.error('Initialization error:', error);
         setIsInitializing(false);
@@ -356,7 +356,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
             const aiMsg: Message = { id: Date.now().toString(), text: cleanConfirmation || `Switched to ${safeLang}.`, sender: 'ai', timestamp: new Date() };
             setMessages(prev => [...prev, { id: (Date.now() - 1).toString(), text: transcript, sender: 'user', timestamp: new Date() }, aiMsg]);
             setIsGenerating(false);
-            speak(aiMsg.text, () => setWakeWordTrigger(prev => prev + 1));
+            speak(aiMsg.text);
             return;
           }
         }
@@ -407,7 +407,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
     if (currentIntent === 'UNCERTAIN') {
       const msg: Message = { id: Date.now().toString(), text: "I'm not sure if you want me to look at something. Should I open the camera?", sender: 'ai', timestamp: new Date() };
       setMessages(prev => [...prev, { id: (Date.now() - 1).toString(), text, sender: 'user', timestamp: new Date() }, msg]);
-      speak(msg.text, () => setWakeWordTrigger(prev => prev + 1));
+      speak(msg.text);
       return;
     }
 
@@ -466,7 +466,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       }
       
       const finalClean = fullResponse.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').trim();
-      if (finalClean) speak(finalClean, () => setWakeWordTrigger(prev => prev + 1));
+      if (finalClean) speak(finalClean);
     } catch (err) {
       console.error('Completion error:', err);
       setMessages((prev) => prev.map((msg) => msg.id === assistantMsgId ? { ...msg, text: "Sorry, I encountered an error." } : msg));
@@ -520,10 +520,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       const finalClean = fullResponse.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').trim();
       if (finalClean) {
         await new Promise<void>(resolve => {
-          speak(finalClean, () => {
-            setWakeWordTrigger(prev => prev + 1);
-            resolve();
-          });
+          speak(finalClean, () => resolve());
         });
       }
     } catch (err) {
