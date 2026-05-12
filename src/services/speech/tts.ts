@@ -77,28 +77,47 @@ export const speakText = async (text: string, onDone?: () => void) => {
     return;
   }
 
-  // Ensure any previous speech is stopped first
+  // Stop any previous speech and wait for engine to release
   try {
     await Speech.stop();
   } catch (e) {}
+  // Android TTS engine needs a moment between stop and start
+  await new Promise(resolve => setTimeout(resolve, 100));
   
   await refreshTTSLanguage();
   const langCode = cachedLanguageCode || 'en-US';
 
   isSpeaking = true;
+  let callbackFired = false;
+
+  const safeOnDone = () => {
+    if (callbackFired) return;
+    callbackFired = true;
+    isSpeaking = false;
+    if (onDone) onDone();
+  };
+
+  // Safety timeout — if TTS silently drops the speech (no onDone/onError), 
+  // we still clean up after 15 seconds so the app doesn't get stuck
+  const safetyTimeout = setTimeout(() => {
+    if (!callbackFired) {
+      console.warn('[TTS] ⚠️ Safety timeout — speech may have been silently dropped');
+      safeOnDone();
+    }
+  }, 15000);
 
   const speakOptions: any = {
     ...VOICE_CONFIG,
     language: langCode,
     onDone: () => {
-      isSpeaking = false;
+      clearTimeout(safetyTimeout);
       console.log('[TTS] ✅ Speech completed');
-      if (onDone) onDone();
+      safeOnDone();
     },
     onError: (error: any) => {
-      isSpeaking = false;
+      clearTimeout(safetyTimeout);
       console.error('[TTS] ❌ Error:', error);
-      if (onDone) onDone();
+      safeOnDone();
     },
     onStart: () => {
       console.log('[TTS] 🔊 Speech started:', text.substring(0, 50));

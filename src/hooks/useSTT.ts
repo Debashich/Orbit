@@ -6,55 +6,62 @@ export const useSTT = () => {
   const [isListening, setIsListening] = useState(false);
   const [isWakeWordDetected, setIsWakeWordDetected] = useState(false);
   const isListeningRef = useRef(false);
+  const isBusyRef = useRef(false);
+  const failCountRef = useRef(0);
 
   const startListening = useCallback(async (options: { continuous?: boolean } = {}) => {
-    console.log('[Hook] 🎯 startListening called, isListeningRef:', isListeningRef.current);
-    
-    if (isListeningRef.current) {
-      // If we are listening, but the state `isListening` is false, it means the wake word detector is running.
-      // We should interrupt it to start a manual listening session.
-      if (!isListening) {
-        console.log('[Hook] 🛑 Interrupting wake word listener for manual listening');
-        await stopVoice();
-      } else {
-        console.log('[Hook] ⚠️ Already in manual listening session, skipping');
-        return;
-      }
+    // Force-clear busy if wake word was running — mic button always wins
+    if (isBusyRef.current && !isListening) {
+      console.log('[Hook] 🛑 Force-clearing busy lock for manual mic press');
+      await stopVoice();
+      await new Promise(resolve => setTimeout(resolve, 150));
+      isListeningRef.current = false;
+      isBusyRef.current = false;
+    }
+
+    if (isBusyRef.current) {
+      console.log('[Hook] ⚠️ Busy, skipping');
+      return;
+    }
+
+    if (isListeningRef.current && isListening) {
+      return; // Already in manual session
     }
     
-    console.log('[Hook] 📍 Setting listening state to true');
+    isBusyRef.current = true;
     setTranscript('');
     setIsListening(true);
     isListeningRef.current = true;
     
     await startVoice(
-      (text) => {
-        console.log('[Hook] 📨 Transcript received:', text);
-        setTranscript(text);
-      },
+      (text) => setTranscript(text),
       () => {
-        console.log('[Hook] 🏁 onEnd callback triggered');
         setIsListening(false);
         isListeningRef.current = false;
+        isBusyRef.current = false;
       },
       options
     );
+    
+    if (!isListeningRef.current) {
+      isBusyRef.current = false;
+      setIsListening(false);
+    }
   }, [isListening]);
 
   const startWakeWordDetection = useCallback(async (onDetected: (transcript?: string) => void, onEnded?: () => void) => {
-    console.log('[Hook] 👂 Starting wake word detection...');
+    if (isListeningRef.current || isBusyRef.current) {
+      if (onEnded) onEnded();
+      return;
+    }
     
-    if (isListeningRef.current) return;
-    
+    isBusyRef.current = true;
     setIsWakeWordDetected(false);
     isListeningRef.current = true;
     
     await startVoice(
       (text) => {
         const lower = text.toLowerCase();
-        // Expanded wake word variants for "Orbit"
-        // Includes common misrecognitions (Orbed, Audit, Corbett, etc.) 
-        // and Hindi transliterations (ऑर्बिट)
         const orbitVariants = [
           'hey orbit', 'orbit', 'hey orbed', 'orbed', 
           'hey audit', 'audit', 'hey corbett', 'corbett',
@@ -64,37 +71,48 @@ export const useSTT = () => {
           'heyorbit', 'hey-orbit'
         ];
         
-        const detected = orbitVariants.some(variant => lower.includes(variant));
-        
-        if (detected) {
+        if (orbitVariants.some(v => lower.includes(v))) {
           console.log('[Hook] 🔔 Wake word detected:', lower);
           setTranscript(lower);
           isListeningRef.current = false;
+          isBusyRef.current = false;
+          failCountRef.current = 0;
           stopVoice();
           setIsWakeWordDetected(true);
           onDetected(lower);
         }
       },
       () => {
-        console.log('[Hook] 🏁 Wake word detection session ended');
         isListeningRef.current = false;
+        isBusyRef.current = false;
         if (onEnded) onEnded();
       },
       { continuous: true, interimResults: true }
     );
+
+    // If start failed
+    if (!isListeningRef.current) {
+      isBusyRef.current = false;
+      failCountRef.current++;
+      if (onEnded) onEnded();
+    }
   }, []);
 
+  const getFailCount = useCallback(() => failCountRef.current, []);
+  const resetFailCount = useCallback(() => { failCountRef.current = 0; }, []);
+
   const stopListening = useCallback(async () => {
-    console.log('[Hook] ⏹️ stopListening called');
     await stopVoice();
     setIsListening(false);
     isListeningRef.current = false;
+    isBusyRef.current = false;
     setIsWakeWordDetected(false);
   }, []);
 
   useEffect(() => {
     return () => {
-      console.log('[Hook] 🧹 Cleanup: calling destroyVoice');
+      isListeningRef.current = false;
+      isBusyRef.current = false;
       destroyVoice();
     };
   }, []);
@@ -106,5 +124,7 @@ export const useSTT = () => {
     startListening,
     stopListening,
     startWakeWordDetection,
+    getFailCount,
+    resetFailCount,
   };
 };

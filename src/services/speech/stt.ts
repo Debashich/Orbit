@@ -1,44 +1,43 @@
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
-import { PermissionsAndroid, Platform, AppState } from "react-native";
+import { AppState, AppStateStatus } from "react-native";
 import { getUserProfile } from "../../../database/db";
 import { getLanguageCode } from "../../constants/languages";
 
 let activeListeners: Array<{ remove: () => void }> = [];
 let isListeningNow = false;
+let cachedPermission: boolean | null = null;
+let cachedLangCode: string | null = null;
 
-// Handle app state changes to turn off mic
-AppState.addEventListener('change', (nextAppState) => {
+// Stop mic immediately when app goes to background/closes
+AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
   if (nextAppState !== 'active') {
-    console.log('[STT] 📱 App backgrounded/closed, ensuring mic is OFF');
-    destroyVoice();
+    if (isListeningNow) {
+      console.log('[STT] 📱 App backgrounded/closed, stopping mic');
+      forceStopAll();
+    }
   }
 });
 
+const forceStopAll = () => {
+  try {
+    isListeningNow = false;
+    clearListeners();
+    ExpoSpeechRecognitionModule.abort();
+  } catch (e) {}
+};
+
 const clearListeners = () => {
-  activeListeners.forEach((listener) => listener.remove());
+  activeListeners.forEach((l) => { try { l.remove(); } catch (e) {} });
   activeListeners = [];
 };
 
-export const checkMicrophonePermission = async () => {
+export const checkMicrophonePermission = async (): Promise<boolean> => {
+  if (cachedPermission === true) return true;
   try {
-    console.log('[STT] 🔐 Checking microphone permission...');
-    if (Platform.OS === 'android') {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        {
-          title: 'Microphone Permission',
-          message: 'Orbit needs access to your microphone so you can talk to her.',
-          buttonNeutral: 'Ask Me Later',
-          buttonNegative: 'Cancel',
-          buttonPositive: 'OK',
-        }
-      );
-      console.log('[STT] 🔐 PermissionsAndroid result:', granted);
-      return granted === PermissionsAndroid.RESULTS.GRANTED;
-    }
-
+    console.log('[STT] 🔐 Requesting speech recognition permission...');
     const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-    console.log('[STT] 🔐 Permission result:', result.granted, 'Status:', result.status);
+    cachedPermission = result.granted;
+    console.log('[STT] 🔐 Permission:', result.granted);
     return result.granted;
   } catch (err) {
     console.error('[STT] ❌ Permission check failed:', err);
@@ -46,79 +45,99 @@ export const checkMicrophonePermission = async () => {
   }
 };
 
+// Pre-cache language code to avoid DB lookup on every start
+const refreshLangCode = async () => {
+  try {
+    const profile = await getUserProfile();
+    cachedLangCode = getLanguageCode(profile?.language);
+  } catch (e) {
+    cachedLangCode = 'en-US';
+  }
+};
+
+// Refresh on first call
+let langInitPromise: Promise<void> | null = null;
+const ensureLangCode = async (): Promise<string> => {
+  if (cachedLangCode) return cachedLangCode;
+  if (!langInitPromise) langInitPromise = refreshLangCode();
+  await langInitPromise;
+  langInitPromise = null;
+  return cachedLangCode || 'en-US';
+};
+
 export const startVoice = async (
   onResult: (text: string) => void, 
   onEnd: () => void, 
   options: { continuous?: boolean; interimResults?: boolean } = {}
 ) => {
-  try {
-    console.log(`[STT] 📢 Starting voice recognition (continuous: ${!!options.continuous})...`);
-    
-    // Safety: Abort any existing session before starting a new one
+  // Abort any existing session quickly
+  if (isListeningNow) {
+    console.log('[STT] ⚠️ Aborting previous session');
     try {
-      await ExpoSpeechRecognitionModule.abort();
+      isListeningNow = false;
+      clearListeners();
+      ExpoSpeechRecognitionModule.abort();
     } catch (e) {}
-    
+    // Minimal wait — just enough for engine to release
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+
+  try {
+    // Use cached permission
+    if (cachedPermission !== true) {
+      const ok = await checkMicrophonePermission();
+      if (!ok) { onEnd(); return; }
+    }
+
     clearListeners();
     isListeningNow = true;
 
-    let hasPermission = false;
-    if (Platform.OS === 'android') {
-      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
-      hasPermission = granted === PermissionsAndroid.RESULTS.GRANTED;
-    } else {
-      const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      hasPermission = result.granted;
-    }
-    
-    if (!hasPermission) {
-      console.warn('[STT] ❌ Microphone permission DENIED.');
+    let hasCalledOnEnd = false;
+    const safeOnEnd = () => {
+      if (hasCalledOnEnd) return;
+      hasCalledOnEnd = true;
       isListeningNow = false;
+      clearListeners();
       onEnd();
-      return;
-    }
+    };
 
     const resultListener = ExpoSpeechRecognitionModule.addListener('result', (event) => {
-      if (event.results && event.results[0]) {
-        const transcript = event.results[0].transcript;
-        onResult(transcript);
+      if (event.results?.[0]) {
+        onResult(event.results[0].transcript);
       }
     });
 
     const errorListener = ExpoSpeechRecognitionModule.addListener('error', (event) => {
       console.error('[STT] ❌ Error:', event.error, event.message);
-      isListeningNow = false;
-      clearListeners();
-      onEnd();
+      if (event.error === 'service-not-allowed') cachedPermission = null;
+      safeOnEnd();
     });
 
     const endListener = ExpoSpeechRecognitionModule.addListener('end', () => {
       console.log('[STT] 🛑 Listening ended');
-      isListeningNow = false;
-      clearListeners();
-      onEnd();
+      safeOnEnd();
     });
 
     activeListeners = [resultListener, errorListener, endListener];
 
-    const profile = await getUserProfile();
-    const langCode = getLanguageCode(profile?.language);
+    // Use cached lang code for speed
+    const langCode = await ensureLangCode();
 
     ExpoSpeechRecognitionModule.start({
       lang: langCode,
       interimResults: options.interimResults ?? true,
       continuous: options.continuous ?? false,
-    });
+    } as any);
   } catch (err) {
     console.error('[STT] ❌ Start Error:', err);
     isListeningNow = false;
+    clearListeners();
     onEnd();
   }
 };
 
 export const stopVoice = async () => {
   try {
-    console.log('[STT] ⏹️ Stopping voice recognition');
     isListeningNow = false;
     clearListeners();
     ExpoSpeechRecognitionModule.stop();
@@ -129,11 +148,15 @@ export const stopVoice = async () => {
 
 export const destroyVoice = async () => {
   try {
-    console.log('[STT] 🗑️ Destroying voice recognition');
-    ExpoSpeechRecognitionModule.abort();
     isListeningNow = false;
     clearListeners();
+    ExpoSpeechRecognitionModule.abort();
   } catch (err) {
     console.error('[STT] ❌ Destroy Error:', err);
   }
 };
+
+export const isMicActive = () => isListeningNow;
+
+// Allow external refresh of lang code (e.g., after language change)
+export const refreshSTTLanguage = () => { cachedLangCode = null; };

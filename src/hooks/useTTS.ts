@@ -1,7 +1,9 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { speakText, stopSpeech, initializeTTS } from '../services/speech/tts';
 
 export const useTTS = () => {
+  const isSpeakingRef = useRef(false);
+
   useEffect(() => {
     console.log('[Hook] 🎯 Mounting useTTS hook');
     const init = async () => {
@@ -13,13 +15,20 @@ export const useTTS = () => {
 
   const speak = useCallback((text: string, onDone?: () => void) => {
     console.log('[Hook] 📣 speak() called with:', text);
-    speakText(text, onDone);
+    isSpeakingRef.current = true;
+    speakText(text, () => {
+      isSpeakingRef.current = false;
+      if (onDone) onDone();
+    });
   }, []);
 
   const stop = useCallback(async () => {
     console.log('[Hook] ⏹️ stop() called');
+    isSpeakingRef.current = false;
     stopSpeech();
   }, []);
 
-  return { speak, stop };
+  const getIsSpeaking = useCallback(() => isSpeakingRef.current, []);
+
+  return { speak, stop, getIsSpeaking };
 };

@@ -7,9 +7,6 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Icons from '@expo/vector-icons';
@@ -74,49 +71,71 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   const hookRoute = useRoute<any>();
   const navigation = propNavigation || hookNavigation;
   const route = propRoute || hookRoute;
-  const { speak, stop } = useTTS();
-  const { transcript, isListening, startListening, stopListening, startWakeWordDetection } = useSTT();
+  const { speak, stop, getIsSpeaking } = useTTS();
+  const { transcript, isListening, startListening, stopListening, startWakeWordDetection, getFailCount, resetFailCount } = useSTT();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const isWakeWordActive = useRef(false);
+  const isGeneratingRef = useRef(false);
+  const isInitializingRef = useRef(true);
+  const handleMicPressRef = useRef<() => void>(() => {});
+  const wakeLoopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wakeLoopMounted = useRef(true);
 
-  // Wake word detection loop
-  useEffect(() => {
-    let timeout: ReturnType<typeof setTimeout>;
-    
-    const runWakeWord = async () => {
-      if (!isListening && !isGenerating && !isInitializing && !isWakeWordActive.current) {
-        isWakeWordActive.current = true;
-        console.log('[Home] 👂 Starting background wake word detection...');
-        await startWakeWordDetection((fullTranscript) => {
-          isWakeWordActive.current = false;
-          
-          // Check if there is a command following the wake word
-          if (fullTranscript) {
-             const lower = fullTranscript.toLowerCase();
-             // Simple check if it's just the wake word or has more
-             const words = lower.trim().split(/\s+/);
-             if (words.length > 2) {
-                // Potential command included, skip the "Go ahead" prompt
-                // Just let the useEffect for transcript handle it
-                return;
-             }
-          }
+  // Keep refs in sync with state
+  useEffect(() => { isGeneratingRef.current = isGenerating; }, [isGenerating]);
+  useEffect(() => { isInitializingRef.current = isInitializing; }, [isInitializing]);
 
-          handleMicPress(); // Trigger active listening with "Go ahead"
-        });
+  // Self-contained wake word loop — does NOT depend on React state changes
+  const scheduleWakeWord = useCallback((delay = 1000) => {
+    if (wakeLoopTimer.current) clearTimeout(wakeLoopTimer.current);
+    if (!wakeLoopMounted.current) return;
+
+    wakeLoopTimer.current = setTimeout(async () => {
+      if (!wakeLoopMounted.current) return;
+
+      // Wait for all blocking conditions to clear
+      if (isInitializingRef.current || isGeneratingRef.current || isWakeWordActive.current || getIsSpeaking()) {
+        scheduleWakeWord(500);
+        return;
       }
+
+      isWakeWordActive.current = true;
+      console.log('[Home] 👂 Starting wake word detection...');
+
+      await startWakeWordDetection(
+        (fullTranscript) => {
+          isWakeWordActive.current = false;
+          if (!wakeLoopMounted.current) return;
+          if (fullTranscript) {
+            const words = fullTranscript.toLowerCase().trim().split(/\s+/);
+            if (words.length > 2) return;
+          }
+          handleMicPressRef.current();
+        },
+        () => {
+          isWakeWordActive.current = false;
+          if (wakeLoopMounted.current) scheduleWakeWord(1000);
+        }
+      );
+
+      // If detection was rejected (useSTT busy), retry
+      if (!isWakeWordActive.current && wakeLoopMounted.current) {
+        scheduleWakeWord(2000);
+      }
+    }, delay);
+  }, [startWakeWordDetection, getIsSpeaking]);
+
+  // Start the loop once, stop on unmount
+  useEffect(() => {
+    wakeLoopMounted.current = true;
+    if (!isInitializing) scheduleWakeWord(1500);
+    return () => {
+      wakeLoopMounted.current = false;
+      if (wakeLoopTimer.current) clearTimeout(wakeLoopTimer.current);
     };
-
-    if (!isListening && !isGenerating && !isInitializing) {
-      timeout = setTimeout(runWakeWord, 1000);
-    } else {
-      isWakeWordActive.current = false;
-    }
-
-    return () => clearTimeout(timeout);
-  }, [isListening, isGenerating, isInitializing]);
+  }, [isInitializing, scheduleWakeWord]);
 
   const scrollViewRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
@@ -134,7 +153,6 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
 
   const getSensorContext = (loc: LocationData | null) => {
     if (!loc) return "Motion: unknown. Direction: unknown. ";
-    // speed is in m/s. 0.5 m/s is ~1.8 km/h (slow walk)
     const motion = (loc.speed !== null && loc.speed > 0.5) ? "walking" : "stopped";
     let direction = "facing forward";
     if (loc.heading !== null) {
@@ -148,37 +166,36 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   const classifyIntent = async (text: string): Promise<Intent> => {
     const lower = text.toLowerCase();
     
-    // INSTANT HEURISTICS (Multi-language Support & Follow-ups)
-    // Safety / Vision Required (English, Hindi)
-    if (lower.match(/\b(safe|walk|ahead|blocking|door|car|clear|obstacle|path|danger|stop|go|चल|खतरा|साफ|रुक|सामने)\b/)) {
+    if (lower.match(/\b(safe|walk|ahead|blocking|door|car|clear|obstacle|path|danger|stop|go|cross|stairs|step|curb|traffic|signal|चल|खतरा|साफ|रुक|सामने)\b/)) {
       return 'VISION_REQUIRED';
     }
-    // Follow-ups
     if (lower.match(/\b(now|about now|again|once more|फिर से|अभी)\b/)) {
        if (lastIntent === 'VISION_REQUIRED') return 'VISION_REQUIRED';
        if (lastIntent === 'VISION_OPTIONAL') return 'VISION_OPTIONAL';
     }
-    // Descriptive
-    if (lower.match(/\b(describe|what is|read|text|color|label|recognize|identify|looking at|क्या है|देखे|बताओ)\b/)) {
+    if (lower.match(/\b(describe|what is|read|text|color|label|recognize|identify|looking at|see|show|look|scan|क्या है|देखे|बताओ|पढ़ो)\b/)) {
       return 'VISION_OPTIONAL';
     }
-    // Language
     if (lower.match(/\b(speak in|language|switch to|hindi|spanish|english|french|german|bengali|हिंदी|अंग्रेजी|भाषा)\b/)) {
       return 'LANGUAGE_SWITCH';
     }
-    // Conversational
-    if (lower.match(/\b(hello|hi|how are you|who are you|time|weather|joke|नमस्ते)\b/)) {
+    // Expanded NON_VISION: covers most conversational queries to avoid slow LLM fallback
+    if (lower.match(/\b(hello|hi|hey|how are you|who are you|what is your name|your name|time|date|day|weather|temperature|joke|tell me|thank|thanks|help|what can you|good morning|good night|good evening|sorry|please|okay|ok|fine|great|nice|cool|bye|goodbye|where am i|my location|my name|नमस्ते|शुक्रिया|धन्यवाद|कैसे हो|मेरा नाम)\b/)) {
       return 'NON_VISION';
     }
 
+    // If nothing matched, default to NON_VISION for short queries (< 5 words)
+    // Only use LLM for truly ambiguous longer queries
+    const wordCount = text.trim().split(/\s+/).length;
+    if (wordCount <= 4) return 'NON_VISION';
+
     if (!context) return 'UNCERTAIN';
-    // Fallback to LLM
     const prompt = `<start_of_turn>user\n${INTENT_CLASSIFICATION_PROMPT.replace('{query}', text)}<end_of_turn>\n<start_of_turn>model\n`;
     
     let result = '';
     await context.completion({
       prompt,
-      n_predict: 20,
+      n_predict: 10,
       stop: ['<end_of_turn>', '\n'],
       temperature: 0.1,
     }, (res) => {
@@ -193,7 +210,6 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
     return 'UNCERTAIN';
   };
 
-  // Sync ref with state
   useEffect(() => {
     contextRef.current = context;
   }, [context]);
@@ -250,7 +266,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
             timestamp: new Date(),
           },
         ]);
-        speak(`Hello! I am Orbit. How can I help you today?`);
+        speak(`Hello! I am Orbit. How can I help you today?`, () => setWakeWordTrigger(prev => prev + 1));
       } catch (error) {
         console.error('Initialization error:', error);
         setIsInitializing(false);
@@ -340,7 +356,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
             const aiMsg: Message = { id: Date.now().toString(), text: cleanConfirmation || `Switched to ${safeLang}.`, sender: 'ai', timestamp: new Date() };
             setMessages(prev => [...prev, { id: (Date.now() - 1).toString(), text: transcript, sender: 'user', timestamp: new Date() }, aiMsg]);
             setIsGenerating(false);
-            speak(aiMsg.text);
+            speak(aiMsg.text, () => setWakeWordTrigger(prev => prev + 1));
             return;
           }
         }
@@ -371,10 +387,10 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
     speak('Go ahead', () => {
       setTimeout(() => {
         startListening();
-      }, 100);
+      }, 150);
     });
   };
-
+  handleMicPressRef.current = handleMicPress;
   const handleManualCameraPress = useCallback(async () => {
     if (isGenerating || isAnalyzingImage) return;
     if (isListening) await stopListening();
@@ -391,7 +407,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
     if (currentIntent === 'UNCERTAIN') {
       const msg: Message = { id: Date.now().toString(), text: "I'm not sure if you want me to look at something. Should I open the camera?", sender: 'ai', timestamp: new Date() };
       setMessages(prev => [...prev, { id: (Date.now() - 1).toString(), text, sender: 'user', timestamp: new Date() }, msg]);
-      speak(msg.text);
+      speak(msg.text, () => setWakeWordTrigger(prev => prev + 1));
       return;
     }
 
@@ -426,7 +442,9 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       
       let attempt = 1;
       const maxAttempts = 2;
-      const languageInstruction = `\nCRITICAL: Respond in ${langName} using its native script and alphabet. NO Latin letters.`;
+      const languageInstruction = langName.toLowerCase() === 'english'
+        ? `\nCRITICAL: Respond in English only. Use proper English words and grammar. Do NOT use Hindi, Hinglish, or any other language.`
+        : `\nCRITICAL: Respond in ${langName} using its native script and alphabet. NO Latin/English letters. Write in ${langName} script only.`;
       
       let activeProtocol = GENERAL_ASSISTANT_PROTOCOL;
       if (currentIntent === 'VISION_REQUIRED') activeProtocol = ORBIT_MOBILITY_PROTOCOL;
@@ -448,7 +466,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       }
       
       const finalClean = fullResponse.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').trim();
-      if (finalClean) speak(finalClean);
+      if (finalClean) speak(finalClean, () => setWakeWordTrigger(prev => prev + 1));
     } catch (err) {
       console.error('Completion error:', err);
       setMessages((prev) => prev.map((msg) => msg.id === assistantMsgId ? { ...msg, text: "Sorry, I encountered an error." } : msg));
@@ -476,7 +494,9 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       const langName = getSafePromptLanguageName(profile?.language);
       const currentLoc = await getCurrentLocation();
       const sensorContext = getSensorContext(currentLoc);
-      const languageInstruction = `\nCRITICAL: Respond in ${langName} using its native script.`;
+      const languageInstruction = langName.toLowerCase() === 'english'
+        ? `\nCRITICAL: Respond in English only. Do NOT use Hindi, Hinglish, or any other language.`
+        : `\nCRITICAL: Respond in ${langName} using its native script. NO Latin/English letters.`;
       const activeProtocol = intent === 'VISION_REQUIRED' ? ORBIT_MOBILITY_PROTOCOL : ASSISTIVE_DESCRIPTION_PROTOCOL;
 
       let attempt = 1;
@@ -499,8 +519,12 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       
       const finalClean = fullResponse.replace(/<\/?(start_of_turn|end_of_turn|eos|s|pad)>/gi, '').trim();
       if (finalClean) {
-        speak(finalClean);
-        await new Promise(resolve => setTimeout(resolve, 4000));
+        await new Promise<void>(resolve => {
+          speak(finalClean, () => {
+            setWakeWordTrigger(prev => prev + 1);
+            resolve();
+          });
+        });
       }
     } catch (err) {
       console.error('[Home] Image analysis error:', err);

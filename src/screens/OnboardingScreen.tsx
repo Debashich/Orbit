@@ -67,8 +67,8 @@ const TOTAL_STEPS = QUESTIONS.length; // 5
 export default function OnboardingScreen({ navigation: propNavigation }: any) {
     const hookNavigation = useNavigation<any>();
     const navigation = propNavigation || hookNavigation;
-    const { speak, stop } = useTTS();
-    const { transcript, isListening, startListening, stopListening, startWakeWordDetection } = useSTT();
+    const { speak, stop, getIsSpeaking } = useTTS();
+    const { transcript, isListening, startListening, stopListening, startWakeWordDetection, getFailCount, resetFailCount } = useSTT();
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState(['', '', '', '', '']);
     const [isSaving, setIsSaving] = useState(false);
@@ -93,38 +93,59 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
         };
     }, []);
 
-    // Wake word detection loop
+    // Wake word detection loop — waits for TTS to finish
     useEffect(() => {
         let isMounted = true;
+        let timeout: ReturnType<typeof setTimeout>;
         
         const runWakeWord = async () => {
-            if (isInitialized && !isListening && isMounted && !isWakeWordActive.current && !isSaving) {
-                isWakeWordActive.current = true;
-                await startWakeWordDetection(
-                    // onDetected
-                    () => {
-                        isWakeWordActive.current = false;
-                        if (isMounted) {
-                            speak("I'm listening", () => {
-                                setTimeout(() => {
-                                    startListening();
-                                }, 50);
-                            });
-                        }
-                    },
-                    // onEnded (restart loop if no speech detected)
-                    () => {
-                        isWakeWordActive.current = false;
-                        if (isMounted) {
-                            setWakeWordTrigger(prev => prev + 1);
-                        }
-                    }
-                );
+            if (!isMounted || !isInitialized || isListening || isSaving || isWakeWordActive.current) return;
+            
+            // Don't start while TTS is speaking
+            if (getIsSpeaking()) {
+                if (isMounted) timeout = setTimeout(runWakeWord, 500);
+                return;
             }
+
+            const fails = getFailCount();
+            if (fails >= 3) {
+                if (isMounted) {
+                    timeout = setTimeout(() => {
+                        resetFailCount();
+                        if (isMounted) setWakeWordTrigger(prev => prev + 1);
+                    }, 10000);
+                }
+                return;
+            }
+
+            isWakeWordActive.current = true;
+            await startWakeWordDetection(
+                () => {
+                    isWakeWordActive.current = false;
+                    if (isMounted) {
+                        speak("I'm listening", () => {
+                            setTimeout(() => startListening(), 150);
+                        });
+                    }
+                },
+                () => {
+                    isWakeWordActive.current = false;
+                    if (isMounted) setWakeWordTrigger(prev => prev + 1);
+                }
+            );
         };
 
-        runWakeWord();
-        return () => { isMounted = false; };
+        if (isInitialized && !isListening && !isSaving) {
+            const delay = getFailCount() > 0 ? 3000 : 1000;
+            timeout = setTimeout(runWakeWord, delay);
+        } else {
+            isWakeWordActive.current = false;
+        }
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timeout);
+        };
     }, [isListening, isInitialized, isSaving, wakeWordTrigger]);
 
     useEffect(() => {

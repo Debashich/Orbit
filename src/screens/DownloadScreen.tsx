@@ -33,8 +33,8 @@ const SafeIcon = ({ set, name, size, color }: any) => {
 export default function DownloadScreen({ navigation: propNavigation }: any) {
   const hookNavigation = useNavigation<any>();
   const navigation = propNavigation || hookNavigation;
-  const { speak, stop } = useTTS();
-  const { transcript, startWakeWordDetection, stopListening, isListening, startListening } = useSTT();
+  const { speak, stop, getIsSpeaking } = useTTS();
+  const { transcript, startWakeWordDetection, stopListening, isListening, startListening, getFailCount, resetFailCount } = useSTT();
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'completed' | 'error'>('idle');
   const downloadStateRef = useRef(downloadState);
   const [progress, setProgress] = useState(0);
@@ -79,17 +79,39 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
     }
   }, [transcript]);
 
-  // Wake word detection loop
+  // Wake word detection loop — waits for TTS to finish
+  const [wakeWordTrigger, setWakeWordTrigger] = useState(0);
+  
   useEffect(() => {
     let isMounted = true;
+    let timeout: ReturnType<typeof setTimeout>;
+    
     const runWakeWord = async () => {
-      if (!isListening && isMounted && !isWakeWordActive.current && downloadStateRef.current !== 'downloading') {
-        isWakeWordActive.current = true;
-        await startWakeWordDetection((fullTranscript) => {
+      if (!isMounted || isListening || isWakeWordActive.current || downloadStateRef.current === 'downloading') return;
+      
+      // Don't start while TTS is speaking
+      if (getIsSpeaking()) {
+        if (isMounted) timeout = setTimeout(runWakeWord, 500);
+        return;
+      }
+
+      const fails = getFailCount();
+      if (fails >= 3) {
+        if (isMounted) {
+          timeout = setTimeout(() => {
+            resetFailCount();
+            if (isMounted) setWakeWordTrigger(prev => prev + 1);
+          }, 10000);
+        }
+        return;
+      }
+
+      isWakeWordActive.current = true;
+      await startWakeWordDetection(
+        (fullTranscript) => {
           isWakeWordActive.current = false;
           if (!isMounted) return;
 
-          // Check if command is already in the wake word transcript
           const lower = fullTranscript?.toLowerCase() || '';
           if (lower.includes('start download') || lower.includes('begin') || lower.includes('download')) {
             if (downloadStateRef.current !== 'downloading' && downloadStateRef.current !== 'completed') {
@@ -103,19 +125,31 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
             }
           }
 
-          // Otherwise, speak and start active listening
           speak("How can I help?", () => {
             setTimeout(() => {
               if (isMounted) startListening();
-            }, 100);
+            }, 150);
           });
-        });
-      }
+        },
+        () => {
+          isWakeWordActive.current = false;
+          if (isMounted) setWakeWordTrigger(prev => prev + 1);
+        }
+      );
     };
 
-    runWakeWord();
-    return () => { isMounted = false; };
-  }, [isListening, downloadState]);
+    if (!isListening && downloadStateRef.current !== 'downloading') {
+      const delay = getFailCount() > 0 ? 3000 : 1000;
+      timeout = setTimeout(runWakeWord, delay);
+    } else {
+      isWakeWordActive.current = false;
+    }
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeout);
+    };
+  }, [isListening, downloadState, wakeWordTrigger]);
 
   useEffect(() => {
     // Check if already downloaded (both model and mmproj)
