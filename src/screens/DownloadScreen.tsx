@@ -33,8 +33,8 @@ const SafeIcon = ({ set, name, size, color }: any) => {
 export default function DownloadScreen({ navigation: propNavigation }: any) {
   const hookNavigation = useNavigation<any>();
   const navigation = propNavigation || hookNavigation;
-  const { speak, stop, getIsSpeaking } = useTTS();
-  const { transcript, startWakeWordDetection, stopListening, isListening, startListening, getFailCount, resetFailCount } = useSTT();
+  const { speak, speakAndWait, stop, getIsSpeaking } = useTTS();
+  const { transcript, startWakeWordDetection, stopListening, isListening, startListening } = useSTT();
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'completed' | 'error'>('idle');
   const downloadStateRef = useRef(downloadState);
   const [progress, setProgress] = useState(0);
@@ -95,20 +95,9 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
         return;
       }
 
-      const fails = getFailCount();
-      if (fails >= 3) {
-        if (isMounted) {
-          timeout = setTimeout(() => {
-            resetFailCount();
-            if (isMounted) setWakeWordTrigger(prev => prev + 1);
-          }, 10000);
-        }
-        return;
-      }
-
       isWakeWordActive.current = true;
-      await startWakeWordDetection(
-        (fullTranscript) => {
+      const started = await startWakeWordDetection(
+        async (fullTranscript) => {
           isWakeWordActive.current = false;
           if (!isMounted) return;
 
@@ -125,22 +114,26 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
             }
           }
 
-          speak("How can I help?", () => {
-            setTimeout(() => {
-              if (isMounted) startListening();
-            }, 150);
-          });
+          await speakAndWait("How can I help?");
+          await new Promise(r => setTimeout(r, 800));
+          if (isMounted) startListening();
         },
         () => {
           isWakeWordActive.current = false;
           if (isMounted) setWakeWordTrigger(prev => prev + 1);
         }
       );
+
+      if (!started) {
+        isWakeWordActive.current = false;
+        if (isMounted) timeout = setTimeout(() => {
+          if (isMounted) setWakeWordTrigger(prev => prev + 1);
+        }, 3000);
+      }
     };
 
     if (!isListening && downloadStateRef.current !== 'downloading') {
-      const delay = getFailCount() > 0 ? 3000 : 1000;
-      timeout = setTimeout(runWakeWord, delay);
+      timeout = setTimeout(runWakeWord, 1500);
     } else {
       isWakeWordActive.current = false;
     }

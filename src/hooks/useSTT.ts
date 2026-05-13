@@ -4,85 +4,105 @@ import { startVoice, stopVoice, destroyVoice } from '../services/speech/stt';
 export const useSTT = () => {
   const [transcript, setTranscript] = useState('');
   const [isListening, setIsListening] = useState(false);
-  const [isWakeWordDetected, setIsWakeWordDetected] = useState(false);
   const isListeningRef = useRef(false);
   const isBusyRef = useRef(false);
-  const failCountRef = useRef(0);
 
-  const startListening = useCallback(async (options: { continuous?: boolean } = {}) => {
-    // Force-clear busy if wake word was running — mic button always wins
-    if (isBusyRef.current && !isListening) {
-      console.log('[Hook] 🛑 Force-clearing busy lock for manual mic press');
-      await stopVoice();
-      await new Promise(resolve => setTimeout(resolve, 150));
-      isListeningRef.current = false;
-      isBusyRef.current = false;
+  /**
+   * Force-stop any running STT session (wake word or manual).
+   * Waits for the native engine to fully release before returning.
+   */
+  const forceStop = useCallback(async () => {
+    console.log('[STT-Hook] 🛑 Force-stopping STT session');
+    try { await stopVoice(); } catch (e) {}
+    isListeningRef.current = false;
+    isBusyRef.current = false;
+    setIsListening(false);
+    // Wait for native engine to fully release
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }, []);
+
+  /**
+   * Start listening for user speech input.
+   * Returns true if recognition started successfully, false otherwise.
+   * Always force-stops any existing session first.
+   */
+  const startListening = useCallback(async (): Promise<boolean> => {
+    // Always force-stop first — mic button / prompt must always win
+    if (isBusyRef.current || isListeningRef.current) {
+      await forceStop();
     }
 
-    if (isBusyRef.current) {
-      console.log('[Hook] ⚠️ Busy, skipping');
-      return;
-    }
-
-    if (isListeningRef.current && isListening) {
-      return; // Already in manual session
-    }
-    
     isBusyRef.current = true;
     setTranscript('');
     setIsListening(true);
     isListeningRef.current = true;
-    
-    await startVoice(
+
+    const started = await startVoice(
       (text) => setTranscript(text),
       () => {
         setIsListening(false);
         isListeningRef.current = false;
         isBusyRef.current = false;
       },
-      options
+      {}
     );
-    
-    if (!isListeningRef.current) {
-      isBusyRef.current = false;
-      setIsListening(false);
-    }
-  }, [isListening]);
 
-  const startWakeWordDetection = useCallback(async (onDetected: (transcript?: string) => void, onEnded?: () => void) => {
-    if (isListeningRef.current || isBusyRef.current) {
-      if (onEnded) onEnded();
-      return;
+    if (!started) {
+      isBusyRef.current = false;
+      isListeningRef.current = false;
+      setIsListening(false);
+      console.log('[STT-Hook] ⚠️ startListening failed');
+      return false;
     }
-    
+
+    console.log('[STT-Hook] ✅ Listening started');
+    return true;
+  }, [forceStop]);
+
+  /**
+   * Start wake word detection in continuous mode.
+   * When detected, calls onDetected with the transcript.
+   * When session ends naturally (silence timeout), calls onEnded.
+   */
+  const startWakeWordDetection = useCallback(async (
+    onDetected: (transcript?: string) => void,
+    onEnded?: () => void
+  ): Promise<boolean> => {
+    if (isBusyRef.current || isListeningRef.current) {
+      console.log('[STT-Hook] ⚠️ Busy, skipping wake word start');
+      if (onEnded) onEnded();
+      return false;
+    }
+
     isBusyRef.current = true;
-    setIsWakeWordDetected(false);
     isListeningRef.current = true;
-    
-    await startVoice(
+
+    const started = await startVoice(
       (text) => {
         const lower = text.toLowerCase();
         const orbitVariants = [
-          'hey orbit', 'orbit', 'hey orbed', 'orbed', 
+          'hey orbit', 'orbit', 'hey orbed', 'orbed',
           'hey audit', 'audit', 'hey corbett', 'corbett',
           'hey order', 'order', 'hey orb', 'orb',
           'hey corporate', 'corporate', 'hey carpet', 'carpet',
           'हे ऑर्बिट', 'ऑर्बिट', 'ओर्बिट', 'हे ओर्बिट',
           'heyorbit', 'hey-orbit'
         ];
-        
+
         if (orbitVariants.some(v => lower.includes(v))) {
-          console.log('[Hook] 🔔 Wake word detected:', lower);
+          console.log('[STT-Hook] 🔔 Wake word detected:', lower);
           setTranscript(lower);
+          // Clear flags FIRST
           isListeningRef.current = false;
           isBusyRef.current = false;
-          failCountRef.current = 0;
+          // Stop the recognition session
           stopVoice();
-          setIsWakeWordDetected(true);
+          // Notify caller
           onDetected(lower);
         }
       },
       () => {
+        // Session ended naturally (silence timeout)
         isListeningRef.current = false;
         isBusyRef.current = false;
         if (onEnded) onEnded();
@@ -90,27 +110,27 @@ export const useSTT = () => {
       { continuous: true, interimResults: true }
     );
 
-    // If start failed
-    if (!isListeningRef.current) {
+    if (!started) {
       isBusyRef.current = false;
-      failCountRef.current++;
+      isListeningRef.current = false;
+      console.log('[STT-Hook] ⚠️ Wake word detection failed to start');
       if (onEnded) onEnded();
+      return false;
     }
-  }, []);
 
-  const getFailCount = useCallback(() => failCountRef.current, []);
-  const resetFailCount = useCallback(() => { failCountRef.current = 0; }, []);
+    return true;
+  }, []);
 
   const stopListening = useCallback(async () => {
     await stopVoice();
     setIsListening(false);
     isListeningRef.current = false;
     isBusyRef.current = false;
-    setIsWakeWordDetected(false);
   }, []);
 
   useEffect(() => {
     return () => {
+      console.log('[STT-Hook] 🧹 useSTT unmounting, destroying voice');
       isListeningRef.current = false;
       isBusyRef.current = false;
       destroyVoice();
@@ -120,11 +140,8 @@ export const useSTT = () => {
   return {
     transcript,
     isListening,
-    isWakeWordDetected,
     startListening,
     stopListening,
     startWakeWordDetection,
-    getFailCount,
-    resetFailCount,
   };
 };

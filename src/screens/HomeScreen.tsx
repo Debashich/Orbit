@@ -71,14 +71,15 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   const hookRoute = useRoute<any>();
   const navigation = propNavigation || hookNavigation;
   const route = propRoute || hookRoute;
-  const { speak, stop, getIsSpeaking } = useTTS();
-  const { transcript, isListening, startListening, stopListening, startWakeWordDetection, getFailCount, resetFailCount } = useSTT();
+  const { speak, speakAndWait, stop, getIsSpeaking } = useTTS();
+  const { transcript, isListening, startListening, stopListening, startWakeWordDetection } = useSTT();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const isWakeWordActive = useRef(false);
   const isGeneratingRef = useRef(false);
   const isInitializingRef = useRef(true);
+  const isListeningRef = useRef(false);
   const handleMicPressRef = useRef<() => void>(() => {});
   const wakeLoopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wakeLoopMounted = useRef(true);
@@ -86,8 +87,10 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   // Keep refs in sync with state
   useEffect(() => { isGeneratingRef.current = isGenerating; }, [isGenerating]);
   useEffect(() => { isInitializingRef.current = isInitializing; }, [isInitializing]);
+  useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
 
-  // Self-contained wake word loop — does NOT depend on React state changes
+  // ─── Self-contained wake word loop ───
+  // Uses refs for blocking checks, restarts via scheduleWakeWord.
   const scheduleWakeWord = useCallback((delay = 1000) => {
     if (wakeLoopTimer.current) clearTimeout(wakeLoopTimer.current);
     if (!wakeLoopMounted.current) return;
@@ -95,8 +98,14 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
     wakeLoopTimer.current = setTimeout(async () => {
       if (!wakeLoopMounted.current) return;
 
-      // Wait for all blocking conditions to clear
-      if (isInitializingRef.current || isGeneratingRef.current || isWakeWordActive.current || getIsSpeaking()) {
+      // Wait for ALL blocking conditions to clear
+      if (
+        isInitializingRef.current || 
+        isGeneratingRef.current || 
+        isListeningRef.current || 
+        isWakeWordActive.current || 
+        getIsSpeaking()
+      ) {
         scheduleWakeWord(500);
         return;
       }
@@ -104,38 +113,60 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       isWakeWordActive.current = true;
       console.log('[Home] 👂 Starting wake word detection...');
 
-      await startWakeWordDetection(
-        (fullTranscript) => {
+      const started = await startWakeWordDetection(
+        async (fullTranscript) => {
+          // Wake word detected!
           isWakeWordActive.current = false;
           if (!wakeLoopMounted.current) return;
           if (fullTranscript) {
             const words = fullTranscript.toLowerCase().trim().split(/\s+/);
-            if (words.length > 2) return;
+            if (words.length > 2) return; // Command was included
           }
+          // Trigger mic press flow, then restart wake word loop.
+          // scheduleWakeWord polls blocking conditions so it will wait
+          // until the full mic→AI→TTS flow completes before restarting.
           handleMicPressRef.current();
+          scheduleWakeWord(2000);
         },
         () => {
+          // Session ended naturally (silence timeout) — restart loop
           isWakeWordActive.current = false;
-          if (wakeLoopMounted.current) scheduleWakeWord(1000);
+          if (wakeLoopMounted.current) scheduleWakeWord(1500);
         }
       );
 
-      // If detection was rejected (useSTT busy), retry
-      if (!isWakeWordActive.current && wakeLoopMounted.current) {
-        scheduleWakeWord(2000);
+      // If detection failed to start, retry after delay
+      if (!started) {
+        isWakeWordActive.current = false;
+        if (wakeLoopMounted.current) scheduleWakeWord(3000);
       }
     }, delay);
   }, [startWakeWordDetection, getIsSpeaking]);
 
-  // Start the loop once, stop on unmount
+  // Start the loop once init completes, stop on unmount
   useEffect(() => {
     wakeLoopMounted.current = true;
-    if (!isInitializing) scheduleWakeWord(1500);
+    if (!isInitializing) {
+      console.log('[Home] 🚀 Init complete, starting wake word loop');
+      scheduleWakeWord(2500); // Give TTS greeting time to finish
+    }
     return () => {
       wakeLoopMounted.current = false;
       if (wakeLoopTimer.current) clearTimeout(wakeLoopTimer.current);
     };
   }, [isInitializing, scheduleWakeWord]);
+
+  // ─── Auto-restart wake word when system becomes idle ───
+  // This is the primary restart mechanism. Whenever isGenerating or
+  // isListening flip to false, we kick the wake word loop if it's not
+  // already running. This covers all edge cases (mic button, wake word,
+  // AI response completion, TTS completion, etc.)
+  useEffect(() => {
+    if (!isInitializing && !isGenerating && !isListening && !isWakeWordActive.current) {
+      console.log('[Home] 🔄 System idle, restarting wake word loop');
+      scheduleWakeWord(1500);
+    }
+  }, [isGenerating, isListening, isInitializing, scheduleWakeWord]);
 
   const scrollViewRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
@@ -184,8 +215,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       return 'NON_VISION';
     }
 
-    // If nothing matched, default to NON_VISION for short queries (< 5 words)
-    // Only use LLM for truly ambiguous longer queries
+    // Short queries (≤4 words) default to NON_VISION — skip slow LLM
     const wordCount = text.trim().split(/\s+/).length;
     if (wordCount <= 4) return 'NON_VISION';
 
@@ -276,7 +306,9 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
     initializeApp();
 
     return () => {
+      // CRITICAL: stop TTS and release mic on unmount
       stop();
+      stopListening();
       if (contextRef.current) {
         contextRef.current.release();
       }
@@ -307,6 +339,7 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   useEffect(() => {
     if (transcript && transcript !== lastProcessedTranscript.current && !isListening && !isGenerating && !isAnalyzingImage) {
       lastProcessedTranscript.current = transcript;
+      console.log('[Home] 🧠 Processing transcript:', `"${transcript}"`);
       
       const processIntent = async () => {
         const intent = await classifyIntent(transcript);
@@ -315,9 +348,8 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
         if (intent === 'VISION_REQUIRED' || intent === 'VISION_OPTIONAL') {
           const analysisPrompt = extractCameraPrompt(transcript);
           const feedback = intent === 'VISION_REQUIRED' ? 'Checking surroundings.' : 'Looking now.';
-          speak(feedback, () => {
-            openCamera(transcript, analysisPrompt, intent);
-          });
+          await speakAndWait(feedback);
+          openCamera(transcript, analysisPrompt, intent);
           setLastIntent(intent);
           return;
         }
@@ -363,9 +395,8 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
 
         if ((lower === 'yes' || lower === 'yeah' || lower === 'sure' || lower === 'do it' || lower.includes('हाँ') || lower.includes('करो')) && 
             (lastIntent === 'VISION_OPTIONAL' || lastIntent === 'UNCERTAIN')) {
-          speak('Opening camera.', () => {
-            openCamera('Looking at surroundings', 'Describe the scene.', 'VISION_OPTIONAL');
-          });
+          await speakAndWait('Opening camera.');
+          openCamera('Looking at surroundings', 'Describe the scene.', 'VISION_OPTIONAL');
           return;
         }
 
@@ -379,26 +410,28 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
 
   const handleMicPress = async () => {
     if (isGenerating) return;
+    // Stop any running wake word detection AND TTS
+    await stopListening();
     await stop();
     if (isListening) {
-      await stopListening();
-      return;
+      return; // Was actively listening, just stop
     }
-    speak('Go ahead', () => {
-      setTimeout(() => {
-        startListening();
-      }, 150);
-    });
+    // Await-based sequencing: TTS completes THEN mic opens
+    await speakAndWait('Go ahead');
+    // Generous delay for Android audio focus handoff and speaker cleanup.
+    // Prevents the mic from hearing the tail end of "Go ahead".
+    await new Promise(r => setTimeout(r, 800));
+    startListening();
   };
   handleMicPressRef.current = handleMicPress;
+
   const handleManualCameraPress = useCallback(async () => {
     if (isGenerating || isAnalyzingImage) return;
     if (isListening) await stopListening();
     await stop();
-    speak('Opening camera now', () => {
-      openCamera('Capture image', 'Describe what you see in this image.', 'VISION_OPTIONAL');
-    });
-  }, [isGenerating, isAnalyzingImage, isListening, stopListening, stop, speak, openCamera]);
+    await speakAndWait('Opening camera now');
+    openCamera('Capture image', 'Describe what you see in this image.', 'VISION_OPTIONAL');
+  }, [isGenerating, isAnalyzingImage, isListening, stopListening, stop, speakAndWait, openCamera]);
 
   const sendMessage = async (text: string, currentIntent: Intent = 'NON_VISION') => {
     if (isGenerating || !text.trim() || !context) return;

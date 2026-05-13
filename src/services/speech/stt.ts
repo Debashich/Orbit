@@ -1,30 +1,12 @@
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
-import { AppState, AppStateStatus } from "react-native";
 import { getUserProfile } from "../../../database/db";
 import { getLanguageCode } from "../../constants/languages";
+import { AppState, AppStateStatus } from "react-native";
 
 let activeListeners: Array<{ remove: () => void }> = [];
 let isListeningNow = false;
 let cachedPermission: boolean | null = null;
 let cachedLangCode: string | null = null;
-
-// Stop mic immediately when app goes to background/closes
-AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-  if (nextAppState !== 'active') {
-    if (isListeningNow) {
-      console.log('[STT] 📱 App backgrounded/closed, stopping mic');
-      forceStopAll();
-    }
-  }
-});
-
-const forceStopAll = () => {
-  try {
-    isListeningNow = false;
-    clearListeners();
-    ExpoSpeechRecognitionModule.abort();
-  } catch (e) {}
-};
 
 const clearListeners = () => {
   activeListeners.forEach((l) => { try { l.remove(); } catch (e) {} });
@@ -45,7 +27,6 @@ export const checkMicrophonePermission = async (): Promise<boolean> => {
   }
 };
 
-// Pre-cache language code to avoid DB lookup on every start
 const refreshLangCode = async () => {
   try {
     const profile = await getUserProfile();
@@ -55,7 +36,6 @@ const refreshLangCode = async () => {
   }
 };
 
-// Refresh on first call
 let langInitPromise: Promise<void> | null = null;
 const ensureLangCode = async (): Promise<string> => {
   if (cachedLangCode) return cachedLangCode;
@@ -65,34 +45,53 @@ const ensureLangCode = async (): Promise<string> => {
   return cachedLangCode || 'en-US';
 };
 
-export const startVoice = async (
-  onResult: (text: string) => void, 
-  onEnd: () => void, 
-  options: { continuous?: boolean; interimResults?: boolean } = {}
-) => {
-  // Abort any existing session quickly
-  if (isListeningNow) {
-    console.log('[STT] ⚠️ Aborting previous session');
-    try {
+// Monitor app state — force-stop mic when app goes to background
+let appStateSubscription: { remove: () => void } | null = null;
+
+const setupAppStateMonitor = () => {
+  if (appStateSubscription) return;
+  appStateSubscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+    if (nextState !== 'active' && isListeningNow) {
+      console.log('[STT] 📱 App not active, force-stopping mic');
+      try {
+        clearListeners();
+        ExpoSpeechRecognitionModule.abort();
+      } catch (e) {}
       isListeningNow = false;
-      clearListeners();
-      ExpoSpeechRecognitionModule.abort();
-    } catch (e) {}
-    // Minimal wait — just enough for engine to release
-    await new Promise(resolve => setTimeout(resolve, 150));
-  }
+    }
+  });
+};
+
+/**
+ * Start speech recognition. Returns a Promise<boolean> indicating whether
+ * the recognition session actually started successfully.
+ */
+export const startVoice = async (
+  onResult: (text: string) => void,
+  onEnd: () => void,
+  options: { continuous?: boolean; interimResults?: boolean } = {}
+): Promise<boolean> => {
+  setupAppStateMonitor();
+
+  // Always abort previous session first
+  try {
+    clearListeners();
+    ExpoSpeechRecognitionModule.abort();
+  } catch (e) {}
+  isListeningNow = false;
+
+  // Wait for native engine to fully release
+  await new Promise(resolve => setTimeout(resolve, 300));
 
   try {
-    // Use cached permission
     if (cachedPermission !== true) {
       const ok = await checkMicrophonePermission();
-      if (!ok) { onEnd(); return; }
+      if (!ok) { onEnd(); return false; }
     }
 
-    clearListeners();
-    isListeningNow = true;
-
     let hasCalledOnEnd = false;
+    let didStart = false;
+
     const safeOnEnd = () => {
       if (hasCalledOnEnd) return;
       hasCalledOnEnd = true;
@@ -101,13 +100,19 @@ export const startVoice = async (
       onEnd();
     };
 
-    const resultListener = ExpoSpeechRecognitionModule.addListener('result', (event) => {
+    // Register event listeners
+    const startListener = ExpoSpeechRecognitionModule.addListener('start', () => {
+      console.log('[STT] ✅ Recognition started');
+      didStart = true;
+    });
+
+    const resultListener = ExpoSpeechRecognitionModule.addListener('result', (event: any) => {
       if (event.results?.[0]) {
         onResult(event.results[0].transcript);
       }
     });
 
-    const errorListener = ExpoSpeechRecognitionModule.addListener('error', (event) => {
+    const errorListener = ExpoSpeechRecognitionModule.addListener('error', (event: any) => {
       console.error('[STT] ❌ Error:', event.error, event.message);
       if (event.error === 'service-not-allowed') cachedPermission = null;
       safeOnEnd();
@@ -118,9 +123,9 @@ export const startVoice = async (
       safeOnEnd();
     });
 
-    activeListeners = [resultListener, errorListener, endListener];
+    activeListeners = [startListener, resultListener, errorListener, endListener];
+    isListeningNow = true;
 
-    // Use cached lang code for speed
     const langCode = await ensureLangCode();
 
     ExpoSpeechRecognitionModule.start({
@@ -128,11 +133,22 @@ export const startVoice = async (
       interimResults: options.interimResults ?? true,
       continuous: options.continuous ?? false,
     } as any);
+
+    // Wait briefly to see if recognition actually starts
+    await new Promise(resolve => setTimeout(resolve, 400));
+
+    if (!didStart && !hasCalledOnEnd) {
+      // Recognition may still be initializing — give it more time
+      await new Promise(resolve => setTimeout(resolve, 600));
+    }
+
+    return isListeningNow;
   } catch (err) {
     console.error('[STT] ❌ Start Error:', err);
     isListeningNow = false;
     clearListeners();
     onEnd();
+    return false;
   }
 };
 
@@ -140,7 +156,7 @@ export const stopVoice = async () => {
   try {
     isListeningNow = false;
     clearListeners();
-    ExpoSpeechRecognitionModule.stop();
+    ExpoSpeechRecognitionModule.abort();
   } catch (err) {
     console.error('[STT] ❌ Stop Error:', err);
   }
@@ -151,12 +167,14 @@ export const destroyVoice = async () => {
     isListeningNow = false;
     clearListeners();
     ExpoSpeechRecognitionModule.abort();
+    if (appStateSubscription) {
+      appStateSubscription.remove();
+      appStateSubscription = null;
+    }
   } catch (err) {
     console.error('[STT] ❌ Destroy Error:', err);
   }
 };
 
 export const isMicActive = () => isListeningNow;
-
-// Allow external refresh of lang code (e.g., after language change)
 export const refreshSTTLanguage = () => { cachedLangCode = null; };

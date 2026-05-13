@@ -67,8 +67,8 @@ const TOTAL_STEPS = QUESTIONS.length; // 5
 export default function OnboardingScreen({ navigation: propNavigation }: any) {
     const hookNavigation = useNavigation<any>();
     const navigation = propNavigation || hookNavigation;
-    const { speak, stop, getIsSpeaking } = useTTS();
-    const { transcript, isListening, startListening, stopListening, startWakeWordDetection, getFailCount, resetFailCount } = useSTT();
+    const { speak, speakAndWait, stop, getIsSpeaking } = useTTS();
+    const { transcript, isListening, startListening, stopListening, startWakeWordDetection } = useSTT();
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState(['', '', '', '', '']);
     const [isSaving, setIsSaving] = useState(false);
@@ -107,25 +107,14 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
                 return;
             }
 
-            const fails = getFailCount();
-            if (fails >= 3) {
-                if (isMounted) {
-                    timeout = setTimeout(() => {
-                        resetFailCount();
-                        if (isMounted) setWakeWordTrigger(prev => prev + 1);
-                    }, 10000);
-                }
-                return;
-            }
-
             isWakeWordActive.current = true;
-            await startWakeWordDetection(
-                () => {
+            const started = await startWakeWordDetection(
+                async () => {
                     isWakeWordActive.current = false;
                     if (isMounted) {
-                        speak("I'm listening", () => {
-                            setTimeout(() => startListening(), 150);
-                        });
+                        await speakAndWait("I'm listening");
+                        await new Promise(r => setTimeout(r, 800));
+                        if (isMounted) startListening();
                     }
                 },
                 () => {
@@ -133,11 +122,18 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
                     if (isMounted) setWakeWordTrigger(prev => prev + 1);
                 }
             );
+
+            if (!started) {
+                isWakeWordActive.current = false;
+                // Retry after a longer delay on failure
+                if (isMounted) timeout = setTimeout(() => {
+                    if (isMounted) setWakeWordTrigger(prev => prev + 1);
+                }, 3000);
+            }
         };
 
         if (isInitialized && !isListening && !isSaving) {
-            const delay = getFailCount() > 0 ? 3000 : 1000;
-            timeout = setTimeout(runWakeWord, delay);
+            timeout = setTimeout(runWakeWord, 1500);
         } else {
             isWakeWordActive.current = false;
         }
@@ -190,15 +186,15 @@ export default function OnboardingScreen({ navigation: propNavigation }: any) {
             return;
         }
 
-        // Fast path: Stop current speech and start listening with a very short instruction
+        // Stop any running TTS/wake word
         await stop();
+        await stopListening();
         
-        // Start listening almost immediately for a faster feel
-        speak('Listening', () => {
-            setTimeout(() => {
-                startListening();
-            }, 50);
-        });
+        // Speak prompt and await completion before opening mic
+        await speakAndWait('Listening');
+        // Small delay for Android audio focus handoff
+        await new Promise(r => setTimeout(r, 300));
+        startListening();
     };
 
     const handleNext = async () => {
