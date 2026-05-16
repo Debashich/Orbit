@@ -7,6 +7,7 @@ let activeListeners: Array<{ remove: () => void }> = [];
 let isListeningNow = false;
 let cachedPermission: boolean | null = null;
 let cachedLangCode: string | null = null;
+let currentSafeOnEnd: (() => void) | null = null;
 
 const clearListeners = () => {
   activeListeners.forEach((l) => { try { l.remove(); } catch (e) {} });
@@ -54,6 +55,7 @@ const setupAppStateMonitor = () => {
     if (nextState !== 'active' && isListeningNow) {
       console.log('[STT] 📱 App not active, force-stopping mic');
       try {
+        if (currentSafeOnEnd) currentSafeOnEnd();
         clearListeners();
         ExpoSpeechRecognitionModule.abort();
       } catch (e) {}
@@ -75,6 +77,7 @@ export const startVoice = async (
 
   // Always abort previous session first
   try {
+    if (currentSafeOnEnd) currentSafeOnEnd();
     clearListeners();
     ExpoSpeechRecognitionModule.abort();
   } catch (e) {}
@@ -96,9 +99,12 @@ export const startVoice = async (
       if (hasCalledOnEnd) return;
       hasCalledOnEnd = true;
       isListeningNow = false;
+      currentSafeOnEnd = null;
       clearListeners();
+      try { ExpoSpeechRecognitionModule.abort(); } catch (e) {}
       onEnd();
     };
+    currentSafeOnEnd = safeOnEnd;
 
     // Register event listeners
     const startListener = ExpoSpeechRecognitionModule.addListener('start', () => {
@@ -155,6 +161,9 @@ export const startVoice = async (
 export const stopVoice = async () => {
   try {
     isListeningNow = false;
+    if (currentSafeOnEnd) {
+      currentSafeOnEnd();
+    }
     clearListeners();
     ExpoSpeechRecognitionModule.abort();
   } catch (err) {
@@ -165,6 +174,9 @@ export const stopVoice = async () => {
 export const destroyVoice = async () => {
   try {
     isListeningNow = false;
+    if (currentSafeOnEnd) {
+      currentSafeOnEnd();
+    }
     clearListeners();
     ExpoSpeechRecognitionModule.abort();
     if (appStateSubscription) {

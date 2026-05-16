@@ -86,12 +86,17 @@ export const useSTT = () => {
           'hey order', 'order', 'hey orb', 'orb',
           'hey corporate', 'corporate', 'hey carpet', 'carpet',
           'हे ऑर्बिट', 'ऑर्बिट', 'ओर्बिट', 'हे ओर्बिट',
-          'heyorbit', 'hey-orbit'
+          'heyorbit', 'hey-orbit', 'hey google', 'google', 'he orbit'
         ];
 
         if (orbitVariants.some(v => lower.includes(v))) {
           console.log('[STT-Hook] 🔔 Wake word detected:', lower);
-          setTranscript(lower);
+          const words = lower.trim().split(/\s+/);
+          if (words.length > 2) {
+            setTranscript(lower);
+          } else {
+            setTranscript('');
+          }
           // Clear flags FIRST
           isListeningRef.current = false;
           isBusyRef.current = false;

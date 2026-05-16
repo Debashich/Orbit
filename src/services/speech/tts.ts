@@ -121,7 +121,7 @@ export const speakText = async (text: string, onDone?: () => void): Promise<void
   } catch (e) {}
 
   // 3. Small delay for Android TTS engine to release audio focus
-  await new Promise(resolve => setTimeout(resolve, 150));
+  await new Promise(resolve => setTimeout(resolve, 300));
 
   // 4. Check if we were superseded while waiting
   if (myGeneration !== speakGeneration) {
