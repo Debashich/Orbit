@@ -52,10 +52,10 @@ The entire app — from onboarding to daily navigation — can be operated **usi
 
 ### Core Principles
 
-- ** 100% Offline** — All AI inference runs locally on the device. No data ever leaves the phone.
-- ** Single Model** — One Gemma 4 E2B instance handles text, vision, classification, and multilingual output.
-- ** Fully Hands-Free** — Global "Hey Orbit" wake word across every screen.
-- ** Real-Time** — Sub-second safety decisions using sensor fusion + Gemma 4 vision.
+- **100% Offline** — All AI inference runs locally on the device. No data ever leaves the phone.
+- **Single Model** — One Gemma 4 E2B instance handles text, vision, classification, and multilingual output.
+- **Fully Hands-Free** — Global "Hey Orbit" wake word across every screen.
+- **Real-Time** — Sub-second safety decisions using sensor fusion + Gemma 4 vision.
 
 ---
 
