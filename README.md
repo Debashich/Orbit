@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">🛰️ Orbit — Intelligent Mobility AI</h1>
+  <h1 align="center">Orbit -Intelligent Mobility AI</h1>
   <p align="center">
     <strong>Built with Google Gemma 4 E2B · On-Device · 100% Offline · Zero Cloud</strong>
   </p>
@@ -10,7 +10,7 @@
 
 ---
 
-## 🏆 Hackathon Submission — Gemma 4
+## Hackathon Submission - Gemma 4
 
 **Orbit** demonstrates the full potential of **Google Gemma 4 E2B** as a real-time, multimodal, multilingual AI assistant running **entirely on a mobile phone** — no server, no API, no cloud. Every inference — text, vision, and intent classification — is powered by a single Gemma 4 model.
 
@@ -52,16 +52,16 @@ The entire app — from onboarding to daily navigation — can be operated **usi
 
 ### Core Principles
 
-- **🔒 100% Offline** — All AI inference runs locally on the device. No data ever leaves the phone.
-- **🧠 Single Model** — One Gemma 4 E2B instance handles text, vision, classification, and multilingual output.
-- **🎙️ Fully Hands-Free** — Global "Hey Orbit" wake word across every screen.
-- **⚡ Real-Time** — Sub-second safety decisions using sensor fusion + Gemma 4 vision.
+- ** 100% Offline** — All AI inference runs locally on the device. No data ever leaves the phone.
+- ** Single Model** — One Gemma 4 E2B instance handles text, vision, classification, and multilingual output.
+- ** Fully Hands-Free** — Global "Hey Orbit" wake word across every screen.
+- ** Real-Time** — Sub-second safety decisions using sensor fusion + Gemma 4 vision.
 
 ---
 
 ## Key Features
 
-### 🎙️ Hands-Free Voice Control — "Hey Orbit"
+### Hands-Free Voice Control — "Hey Orbit"
 
 A unified wake word detection system is active across **every screen** in the app, enabling a completely hands-free experience from first launch to daily use.
 
@@ -77,7 +77,7 @@ A unified wake word detection system is active across **every screen** in the ap
 
 ---
 
-### 🧠 5-Class Intent Classification (Gemma 4)
+### 5-Class Intent Classification (Gemma 4)
 
 Every voice input is classified by **Gemma 4** into one of five intents before processing:
 
@@ -95,7 +95,7 @@ Every voice input is classified by **Gemma 4** into one of five intents before p
 
 ---
 
-### 👁️ Multimodal Vision — Gemma 4 + Camera
+### Multimodal Vision — Gemma 4 + Camera
 
 This is where Gemma 4's multimodal architecture shines. The vision projector enables real-time image understanding directly on the phone.
 
@@ -110,7 +110,7 @@ This is where Gemma 4's multimodal architecture shines. The vision projector ena
 
 ---
 
-### 🧭 Sensor Fusion & Situational Awareness
+### Sensor Fusion & Situational Awareness
 
 Orbit fuses phone sensor data and injects it as context into every **Gemma 4** prompt, enabling physically-aware AI responses:
 
@@ -126,7 +126,7 @@ Voice Input + Motion + Direction + Location → Intent Engine → Gemma 4 Protoc
 
 ---
 
-### 🌍 Multilingual Support — 17 Languages (Gemma 4 Native)
+### Multilingual Support — 17 Languages (Gemma 4 Native)
 
 Orbit leverages **Gemma 4's built-in multilingual capabilities** — no translation API, no external service. The entire pipeline adapts:
 
@@ -151,7 +151,7 @@ Orbit leverages **Gemma 4's built-in multilingual capabilities** — no translat
 
 ---
 
-### 🔊 Advanced TTS Engine
+### Advanced TTS Engine
 
 - **Sentence-level chunking**: Long Gemma 4 responses are split at sentence boundaries to prevent the TTS engine from rejecting long strings.
 - **Generation counter**: Prevents stale callbacks from previous speak calls from interfering with current speech.
@@ -162,7 +162,7 @@ Orbit leverages **Gemma 4's built-in multilingual capabilities** — no translat
 
 ---
 
-### 🎤 Robust STT Service
+### Robust STT Service
 
 - **App state monitoring**: Mic is force-stopped when app goes to background.
 - **Permission caching**: Mic permission is checked once and cached for the session.
@@ -171,7 +171,7 @@ Orbit leverages **Gemma 4's built-in multilingual capabilities** — no translat
 
 ---
 
-### 📋 Personalized Onboarding (5-Step Voice Setup)
+### Personalized Onboarding (5-Step Voice Setup)
 
 | Step | Question | How It Customizes Gemma 4 |
 |------|----------|--------------------------|
@@ -189,7 +189,7 @@ Orbit leverages **Gemma 4's built-in multilingual capabilities** — no translat
 
 ---
 
-### 📥 One-Time Model Download
+### One-Time Model Download
 
 Gemma 4 E2B runs entirely on-device, but the model weights need to be downloaded once:
 
