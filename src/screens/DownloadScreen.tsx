@@ -56,7 +56,7 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
   useEffect(() => {
     const reasoning = "Orbit needs to download its intelligence files to work offline. This ensures your privacy as no data will ever leave your device. The download is about 1.6 gigabytes.";
     speak(`Download Screen. ${reasoning}. Say, Hey Orbit, start download, to begin.`);
-    
+
     return () => {
       stop();
       stopListening();
@@ -81,14 +81,14 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
 
   // Wake word detection loop — waits for TTS to finish
   const [wakeWordTrigger, setWakeWordTrigger] = useState(0);
-  
+
   useEffect(() => {
     let isMounted = true;
     let timeout: ReturnType<typeof setTimeout>;
-    
+
     const runWakeWord = async () => {
       if (!isMounted || isListening || isWakeWordActive.current || downloadStateRef.current === 'downloading') return;
-      
+
       // Don't start while TTS is speaking
       if (getIsSpeaking()) {
         if (isMounted) timeout = setTimeout(runWakeWord, 500);
@@ -155,20 +155,20 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
 
         if (modelExists && mmprojExists) {
           const modelStat = await RNFS.stat(modelPath);
-          // Only mark as completed if model is over 1.4GB and mmproj exists
-          if (modelStat.size > 1400000000) {
+          // Only mark as completed if model is over 3.3GB and mmproj exists
+          if (modelStat.size > 3300000000) {
             setDownloadState('completed');
             setProgress(100);
             setDownloadedMB(modelStat.size / 1024 / 1024);
             setTotalMB(modelStat.size / 1024 / 1024);
           } else {
             setDownloadState('idle');
-            setProgress((modelStat.size / (1.6 * 1024 * 1024 * 1024)) * 100);
+            setProgress((modelStat.size / (3.3 * 1024 * 1024 * 1024)) * 100);
             setDownloadedMB(modelStat.size / 1024 / 1024);
           }
         } else if (modelExists) {
           const modelStat = await RNFS.stat(modelPath);
-          if (modelStat.size > 1400000000) {
+          if (modelStat.size > 3300000000) {
             // Model downloaded but mmproj missing — need to download mmproj
             setDownloadState('idle');
             setDownloadPhase('mmproj');
@@ -176,7 +176,7 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
             setDownloadedMB(modelStat.size / 1024 / 1024);
           } else {
             setDownloadState('idle');
-            setProgress((modelStat.size / (1.6 * 1024 * 1024 * 1024)) * 100);
+            setProgress((modelStat.size / (3.3 * 1024 * 1024 * 1024)) * 100);
             setDownloadedMB(modelStat.size / 1024 / 1024);
           }
         }
@@ -201,8 +201,8 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
       const result = RNFS.downloadFile({
         fromUrl: url,
         toFile: destPath,
-        background: true,
-        discretionary: true,
+        background: false,
+        discretionary: false,
         begin: (res) => {
           setTotalMB(res.contentLength / 1024 / 1024);
         },
@@ -237,7 +237,7 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
       let modelComplete = false;
       if (modelExists) {
         const modelStat = await RNFS.stat(modelPath);
-        modelComplete = modelStat.size > 1400000000;
+        modelComplete = modelStat.size > 3300000000;
       }
 
       if (!modelComplete) {
@@ -256,7 +256,7 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
         }
 
         const modelStats = await RNFS.stat(modelPath);
-        if (modelStats.size <= 1400000000) {
+        if (modelStats.size <= 3300000000) {
           setDownloadState('error');
           Alert.alert('Download Failed', 'Incomplete model download.');
           return;
@@ -298,24 +298,24 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
           {/* HEADER */}
           <View style={styles.header}>
             <View style={styles.logoContainer}>
-            <Image source={require('../../assets/logo.png')} style={{ width: 32, height: 32, borderRadius: 8, marginRight: 10 }} />
-            <Text style={styles.logoText}>
-              <Text style={{ color: '#fff' }}>Orbit</Text>
-            </Text>
+              <Image source={require('../../assets/logo.png')} style={{ width: 32, height: 32, borderRadius: 8, marginRight: 10 }} />
+              <Text style={styles.logoText}>
+                <Text style={{ color: '#fff' }}>Orbit</Text>
+              </Text>
             </View>
           </View>
 
           {/* TITLE SECTION */}
           <View style={styles.titleSection}>
             <Text style={styles.title}>
-              {downloadState === 'completed' ? 'Model Ready!' : 
-               downloadState === 'downloading' ? 'Downloading AI model...' : 
-               downloadState === 'error' ? 'Download Failed' : 
-               'Get AI Model'}
+              {downloadState === 'completed' ? 'Model Ready!' :
+                downloadState === 'downloading' ? 'Downloading AI model...' :
+                  downloadState === 'error' ? 'Download Failed' :
+                    'Get AI Model'}
             </Text>
             <Text style={styles.subtitle}>
-              {downloadState === 'completed' ? 'Your local intelligence is ready.' : 
-               'Your intelligence is initializing.'}
+              {downloadState === 'completed' ? 'Your local intelligence is ready.' :
+                'Your intelligence is initializing.'}
             </Text>
           </View>
 
@@ -326,9 +326,9 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
             </View>
 
             <Text style={styles.cardTitle}>Gemma 4 E2B</Text>
-            
+
             <View style={{ width: '100%', marginBottom: 25, marginTop: 10 }}>
-                <Text style={{ color: '#e2e8f0', fontSize: 13, marginBottom: 5, textAlign: 'center' }}>Offline AI model</Text>
+              <Text style={{ color: '#e2e8f0', fontSize: 13, marginBottom: 5, textAlign: 'center' }}>Offline AI model</Text>
             </View>
 
             {/* PROGRESS BAR */}
@@ -351,8 +351,8 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
 
 
             {/* BUTTON */}
-            <TouchableOpacity 
-              activeOpacity={0.8} 
+            <TouchableOpacity
+              activeOpacity={0.8}
               style={styles.buttonWrapper}
               disabled={downloadState === 'downloading'}
               onPress={() => {
@@ -369,17 +369,17 @@ export default function DownloadScreen({ navigation: propNavigation }: any) {
                 end={{ x: 1, y: 0 }}
                 style={[styles.pauseButton, downloadState === 'downloading' && { opacity: 0.7 }]}
               >
-                <SafeIcon 
-                  set="Ionicons" 
-                  name={downloadState === 'completed' ? "checkmark-circle" : downloadState === 'downloading' ? "cloud-download" : "cloud-download-outline"} 
-                  size={20} 
-                  color="white" 
+                <SafeIcon
+                  set="Ionicons"
+                  name={downloadState === 'completed' ? "checkmark-circle" : downloadState === 'downloading' ? "cloud-download" : "cloud-download-outline"}
+                  size={20}
+                  color="white"
                 />
                 <Text style={styles.pauseButtonText}>
-                  {downloadState === 'completed' ? 'CONTINUE TO APP' : 
-                   downloadState === 'downloading' ? 'DOWNLOADING...' : 
-                   downloadState === 'error' ? 'RETRY DOWNLOAD' : 
-                   'START DOWNLOAD'}
+                  {downloadState === 'completed' ? 'CONTINUE TO APP' :
+                    downloadState === 'downloading' ? 'DOWNLOADING...' :
+                      downloadState === 'error' ? 'RETRY DOWNLOAD' :
+                        'START DOWNLOAD'}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>

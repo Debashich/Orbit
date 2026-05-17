@@ -104,7 +104,8 @@ const estimateSpeechDuration = (text: string): number => {
  * 4. Generation counter to discard stale callbacks
  */
 export const speakText = async (text: string, onDone?: () => void): Promise<void> => {
-  if (!text || text.trim().length === 0) {
+  const cleanText = text.replace(/[*#]/g, '');
+  if (!cleanText || cleanText.trim().length === 0) {
     console.log('[TTS] ⚠️ Empty text, skipping');
     onDone?.();
     return;
@@ -173,7 +174,7 @@ export const speakText = async (text: string, onDone?: () => void): Promise<void
     //    to avoid false negatives from Android's isSpeakingAsync.
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let consecutiveFalse = 0;
-    const REQUIRED_FALSE_COUNT = 3;
+    const REQUIRED_FALSE_COUNT = 50;
 
     const startPolling = () => {
       pollTimer = setInterval(async () => {
@@ -221,8 +222,24 @@ export const speakText = async (text: string, onDone?: () => void): Promise<void
       },
     };
 
-    console.log('[TTS] 📢 SPEAKING:', text.substring(0, 60));
-    Speech.speak(text, speakOptions);
+    console.log('[TTS] 📢 SPEAKING:', cleanText.substring(0, 60));
+    
+    // Split text into chunks by sentence endings to prevent Android TTS engine from rejecting long strings
+    const chunks = cleanText.split(/(?<=[.!?।\n])/).filter(c => c.trim().length > 0);
+    
+    if (chunks.length > 1) {
+      for (let i = 0; i < chunks.length; i++) {
+        const isLast = i === chunks.length - 1;
+        const chunkOptions = {
+          ...speakOptions,
+          onDone: isLast ? speakOptions.onDone : undefined,
+          onStart: i === 0 ? speakOptions.onStart : undefined,
+        };
+        Speech.speak(chunks[i].trim(), chunkOptions);
+      }
+    } else {
+      Speech.speak(cleanText, speakOptions);
+    }
 
     // Start polling only after ~60% of estimated speech time.
     // This prevents premature false-negative from isSpeakingAsync.

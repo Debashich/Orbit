@@ -197,21 +197,21 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
   const classifyIntent = async (text: string): Promise<Intent> => {
     const lower = text.toLowerCase();
     
-    if (lower.match(/\b(safe|walk|ahead|blocking|door|car|clear|obstacle|path|danger|stop|go|cross|stairs|step|curb|traffic|signal|चल|खतरा|साफ|रुक|सामने)\b/)) {
+    if (lower.match(/\b(safe|walk|ahead|blocking|door|car|clear|obstacle|path|danger|stop|go|cross|stairs|step|curb|traffic|signal)\b/) || lower.match(/(चल|खतरा|साफ|रुक|सामने)/)) {
       return 'VISION_REQUIRED';
     }
-    if (lower.match(/\b(now|about now|again|once more|फिर से|अभी)\b/)) {
+    if (lower.match(/\b(now|about now|again|once more)\b/) || lower.match(/(फिर से|अभी)/)) {
        if (lastIntent === 'VISION_REQUIRED') return 'VISION_REQUIRED';
        if (lastIntent === 'VISION_OPTIONAL') return 'VISION_OPTIONAL';
     }
-    if (lower.match(/\b(describe|what is|read|text|color|label|recognize|identify|looking at|see|show|look|scan|क्या है|देखे|बताओ|पढ़ो)\b/)) {
+    if (lower.match(/\b(describe|what is|read|text|color|label|recognize|identify|looking at|see|show|look|scan)\b/) || lower.match(/(क्या है|देखे|बताओ|पढ़ो|दिखाओ|नाम|ब्रांड)/)) {
       return 'VISION_OPTIONAL';
     }
-    if (lower.match(/\b(speak in|language|switch to|hindi|spanish|english|french|german|bengali|हिंदी|अंग्रेजी|भाषा)\b/)) {
+    if (lower.match(/\b(speak in|language|switch to|hindi|spanish|english|french|german|bengali)\b/) || lower.match(/(हिंदी|अंग्रेजी|भाषा)/)) {
       return 'LANGUAGE_SWITCH';
     }
     // Expanded NON_VISION: covers most conversational queries to avoid slow LLM fallback
-    if (lower.match(/\b(hello|hi|hey|how are you|who are you|what is your name|your name|time|date|day|weather|temperature|joke|tell me|thank|thanks|help|what can you|good morning|good night|good evening|sorry|please|okay|ok|fine|great|nice|cool|bye|goodbye|where am i|my location|my name|नमस्ते|शुक्रिया|धन्यवाद|कैसे हो|मेरा नाम)\b/)) {
+    if (lower.match(/\b(hello|hi|hey|how are you|who are you|what is your name|your name|time|date|day|weather|temperature|joke|tell me|thank|thanks|help|what can you|good morning|good night|good evening|sorry|please|okay|ok|fine|great|nice|cool|bye|goodbye|where am i|my location|my name)\b/) || lower.match(/(नमस्ते|शुक्रिया|धन्यवाद|कैसे हो|मेरा नाम)/)) {
       return 'NON_VISION';
     }
 
@@ -300,6 +300,15 @@ export default function HomeScreen({ navigation: propNavigation, route: propRout
       } catch (error) {
         console.error('Initialization error:', error);
         setIsInitializing(false);
+        setMessages([
+          {
+            id: 'error_1',
+            text: `I encountered an error while starting the AI engine. This usually means the model file is corrupted or incomplete. Please clear app data and redownload the model.`,
+            sender: 'ai',
+            timestamp: new Date(),
+          },
+        ]);
+        speak(`Error starting the AI engine. Please redownload the model.`);
       }
     };
 
